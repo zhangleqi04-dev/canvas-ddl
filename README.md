@@ -196,7 +196,7 @@ OCR 只提供带页码与置信度的文字，仍须经过同一个规则 extrac
 
 - 同课程、明确同一 logical item：同日期合并；日期不同时 Canvas 优先，conflicts
   保存文档替代值与完整来源。仅日期的 PDF 可与同一天精确 Canvas 时间一致。
-- 仅官方 PDF 有该记录：经验证后成为 canonical deadline，提交状态为 unknown。
+- 仅官方课程文档有该记录：经验证后成为 canonical deadline，提交状态为 unknown。
 - 课程/名称/多次考试身份不明确：不擅自合并；待处理项出现在 unresolved_deadlines，
   不计入总数。没有 Canvas 的冲突 PDF 也不会随意选“最新的一份”。
 - 当前学生的 Canvas due=null 不会被旧 PDF due 复活；unlock/lock 不是 due。
@@ -236,20 +236,21 @@ OCR 依据 [PaddleOCR 官方安装说明](https://www.paddleocr.ai/main/en/versi
 常驻显存。Windows CPU 运行时固定使用 PaddlePaddle 3.2.x；3.3.1 已知在该组合上
 可能触发 oneDNN 不支持的算子。
 
-## 全课程 PDF 考试检查（v0.5）
+## 全课程文档考试检查（v0.9）
 
-“下周有什么考试/几门考试”自动检查所选课程的所有 PDF，不按文件名筛选，也没有
+“下周有什么考试/几门考试”自动检查所选课程的所有受支持文档，不按文件名筛选，也没有
 默认20份上限。上述 prepare-documents 是单独的显式维护命令，其文件名提示与20份
 默认限制不适用于自动考试查询。Files 禁止访问时尝试 Modules 文件链接，并标为部分
 覆盖；访问、下载、解析及空白页失败均保留，不声称已经成功读完所有文件。
 
-新 PDF 可以先解析并保存原文、页码、候选及验证审核到独立的
+新的 PDF、DOCX、PPTX、XLSX、CSV、文本、RTF、HTML 和图片可以先解析并保存原文、
+格式对应的位置、候选及验证审核到独立的
 `data/documents.pending.sqlite3`；官方性和课程期间未批准前仍是未确认参考，
 不能进入 canonical deadline 或考试计数。已批准来源继续使用原事实库和冲突规则。
 相同 metadata/hash 复用已解析内容，新版本按授权更新，最终查询只读取持久化证据。
 
-结果新增 document_content_matches：引擎检索全部已保存页面的考试关键词及上下文，
+结果中的 document_content_matches 来自引擎对全部已保存文档单元的考试关键词及上下文检索，
 覆盖跨行安排。每份文档最多返回10段、每段1500字符并显示截断信息；关键词匹配
 不是考试数量，统计学的 test、举例中的 exam 也不是考试安排。Skill 只呈现相关
-引擎证据及风险，不自行读取 PDF、批准来源或将原文变成最终日期事实。
+引擎证据及风险，不自行读取源文档、批准来源或将原文变成最终日期事实。
 PDF 解析支持能以空用户密码正常打开的 AES 文件；需要实际密码的文件仍安全失败。
