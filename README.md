@@ -17,34 +17,70 @@ Python 引擎负责事实、验证、来源优先级、分类、去重与计数�
 加 `--document-mode existing`。结果的 file_library_check 显示检查/跳过、更新、
 待审核及失败信息。文件库访问失败会明确返回 partial，不声称已检查最新课程文档。
 
-## 安装和查询
+## 跨平台安装
 
 从 GitHub 获取项目：
 
-```powershell
+```text
 git clone https://github.com/zhangleqi04-dev/canvas-ddl.git
 cd canvas-ddl
 ```
 
-在项目根目录执行，无须激活环境或运行 PowerShell 脚本：
+需要 Python 3.11 或更高版本。推荐运行只依赖 Python 标准库的跨平台安装器；如果系统
+没有 `python` 命令，macOS/Linux 通常使用 `python3`：
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev,ocr]"
+```text
+python tools/setup_project.py
 ```
 
-本地 `.env` 设置 CANVAS_BASE_URL、CANVAS_TOKEN、CANVAS_TIMEZONE（默认
-Asia/Singapore）。保留的 CANVAS_API_TOKEN 名称仍兼容；token 不会打印或复制进技能。
-参考 `.env.example`。可选 CANVAS_COURSE_IDS（数字 ID）限定课程。OCR 默认使用
-CPU；`CANVAS_OCR_DEVICE=cpu`、`CANVAS_OCR_DPI=150` 和
-`CANVAS_OCR_MIN_CONFIDENCE=0.90` 适合当前电脑。
+安装器会创建 `.venv`、安装引擎、在终端中隐藏输入 Canvas token，并把 Skill 安装到
+`$CODEX_HOME/skills/canvas-ddl`（未设置 `CODEX_HOME` 时使用 `~/.codex`）。已有且属于
+其他项目的同名 Skill 不会被覆盖。扫描版 PDF 的 OCR 依赖体积较大，按需安装：
+
+```text
+python tools/setup_project.py --ocr
+```
+
+开发者可加 `--dev`；仅安装 Python 引擎可加 `--no-skill`；无人值守环境可加
+`--non-interactive`，然后自行编辑 `.env`。安装后重启 Codex，再使用：
+
+```text
+$canvas-ddl 我下周有什么作业和考试？
+```
+
+### 手动安装
+
+Windows PowerShell：
 
 ```powershell
-.\.venv\Scripts\python.exe -m canvas_ddl.cli.main courses
-.\.venv\Scripts\python.exe -m canvas_ddl.cli.main deadlines --time-intent-file .\time-intent.json --type assignment
-.\.venv\Scripts\python.exe -m canvas_ddl.cli.main deadlines --time-intent-file .\time-intent.json --type exam
-.\.venv\Scripts\python.exe -m canvas_ddl.cli.main upcoming --days 14 --type quiz
-.\.venv\Scripts\python.exe -m canvas_ddl.cli.main deadlines --time-intent-file .\time-intent.json --course "COURSE101" --limit 1
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+Copy-Item .env.example .env
+.\.venv\Scripts\Activate.ps1
+```
+
+macOS/Linux：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .
+cp .env.example .env
+source .venv/bin/activate
+```
+
+在 `.env` 中设置 `CANVAS_BASE_URL`、`CANVAS_TOKEN` 和 `CANVAS_TIMEZONE`。保留的
+`CANVAS_API_TOKEN` 名称仍兼容；token 不会打印或复制进技能。可选
+`CANVAS_COURSE_IDS`（数字 ID）限定课程。OCR 使用 `pip install -e ".[ocr]"` 单独安装，
+默认 CPU 配置适用于普通电脑。
+
+激活虚拟环境后，以下命令在三个平台相同：
+
+```text
+canvas-ddl courses
+canvas-ddl deadlines --time-intent-file time-intent.json --type assignment
+canvas-ddl deadlines --time-intent-file time-intent.json --type exam
+canvas-ddl upcoming --days 14 --type quiz
+canvas-ddl deadlines --time-intent-file time-intent.json --course "COURSE101" --limit 1
 ```
 
 Skill 由 Codex 理解时间，输出 TimeIntent，再由 Python 验证并计算实际范围。
@@ -54,13 +90,7 @@ Skill 由 Codex 理解时间，输出 TimeIntent，再由 Python 验证并计算
 --time-intent JSON 或 --time-intent-file <UTF-8 JSON 文件路径>，不能同时使用
 --start/--end；后两者只接受用户或已验证锚点给出的明确 ISO 时间戳。
 详见 [时间意图接口](skills/canvas-ddl/references/time-intent.md)。
-返回 UTF-8 JSON。保留四个技能脚本，已安装 `canvas-ddl` 个人技能；重启/新会话后：
-
-```text
-$canvas-ddl 我下周有什么作业和考试？
-```
-
-技能从项目或 CANVAS_DDL_HOME 找到同一个引擎，读取已 ingestion 的证据，
+返回 UTF-8 JSON。技能从项目或 CANVAS_DDL_HOME 找到同一个引擎，读取已 ingestion 的证据，
 不自行读源文档、抽取日期、处理冲突或批准官方来源。
 
 ## 官方文档 ingestion
@@ -71,8 +101,8 @@ $canvas-ddl 我下周有什么作业和考试？
 
 无需手动下载和填写课程/链接/hash，运行以下课程范围内的准备命令：
 
-```powershell
-.\.venv\Scripts\python.exe -m canvas_ddl.cli.main prepare-documents --course COURSE101 --course COURSE102
+```text
+canvas-ddl prepare-documents --course COURSE101 --course COURSE102
 ```
 
 引擎通过 Canvas Files API 查找文件名含 syllabus、outline、handout 等提示的可访问
@@ -91,8 +121,8 @@ PNG/JPEG/WebP/TIFF/BMP。Canvas Syllabus 和已发布 Pages 也会在刷新阶�
 维护者查看实际 PDF 和官方课程页面，确认官方性、文档类型与适用教学期间后，
 执行显式批准命令；请将下面的姓名和日期替换为实际值：
 
-```powershell
-.\.venv\Scripts\python.exe -m canvas_ddl.cli.main approve-document --document canvas-12345-67890 --approved-by "你的姓名" --valid-from "YYYY-MM-DD" --valid-until "YYYY-MM-DD" --confirm-official
+```text
+canvas-ddl approve-document --document canvas-12345-67890 --approved-by "你的姓名" --valid-from "YYYY-MM-DD" --valid-until "YYYY-MM-DD" --confirm-official
 ```
 
 此命令批准待审核记录、保留其他已登记文件，然后自动运行 ingestion；重复准备
@@ -114,15 +144,15 @@ PNG/JPEG/WebP/TIFF/BMP。Canvas Syllabus 和已发布 Pages 也会在刷新阶�
 3. 记录其 SHA-256，并运行 ingestion。默认允许 Canvas 本身的域名；其他学校域名
    必须先在 CANVAS_DOCUMENT_HOSTS 中明确批准（逗号分隔，精确 hostname）。
 
-```powershell
+```text
 # 获取本地 PDF 内容哈希，填写 registry 的 sha256 字段
-Get-FileHash -LiteralPath '.\documents\Course Outline 2026.pdf' -Algorithm SHA256
+python -c "import hashlib,pathlib; p=pathlib.Path('documents/Course Outline 2026.pdf'); print(hashlib.sha256(p.read_bytes()).hexdigest())"
 
 # 以下 ID 必须已存在于人工审核后的 registry
-.\.venv\Scripts\python.exe -m canvas_ddl.cli.main ingest --document cs3244-outline-2026
+canvas-ddl ingest --document cs3244-outline-2026
 
 # 查看 ingestion 状态、confirmed/unresolved/rejected 候选信息
-.\.venv\Scripts\python.exe -m canvas_ddl.cli.main documents
+canvas-ddl documents
 ```
 
 sha256 字段要求 64 位小写十六进制。registry 还要求 course_id/code/name、文档类型、
@@ -187,14 +217,14 @@ CANVAS_DOCUMENT_STORE 和 CANVAS_DOCUMENT_REGISTRY 改位置，路径相对于 `
 
 ## 验证与规范
 
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
+```text
+python -m pytest -q
 ```
 
 默认测试为离线模拟数据与生成的 PDF，不需要真实 token。
 [PRD](docs/PRD_DDL_ONLY.md)、[Architecture](docs/ARCHITECTURE.md)、
-[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.9。
-[验证记录](docs/VERIFICATION.md) 记录此次执行结果和边界。
+[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.10。
+本地验证记录可能包含私有课程信息，因此不提交到公开仓库。
 
 PDF parser 依据 [pypdf 官方文档](https://pypdf.readthedocs.io/en/stable/user/extract-text.html)；
 OCR 依据 [PaddleOCR 官方安装说明](https://www.paddleocr.ai/main/en/version3.x/installation.html)
