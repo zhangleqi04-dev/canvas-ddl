@@ -19,6 +19,13 @@ Python 引擎负责事实、验证、来源优先级、分类、去重与计数�
 
 ## 安装和查询
 
+从 GitHub 获取项目：
+
+```powershell
+git clone https://github.com/zhangleqi04-dev/canvas-ddl.git
+cd canvas-ddl
+```
+
 在项目根目录执行，无须激活环境或运行 PowerShell 脚本：
 
 ```powershell

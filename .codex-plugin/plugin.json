@@ -3,8 +3,11 @@
   "version": "0.10.0",
   "description": "Query Canvas and validated official course documents for deadlines with source-aware reconciliation.",
   "author": {
-    "name": "Canvas DDL Contributors"
+    "name": "Canvas DDL Contributors",
+    "url": "https://github.com/zhangleqi04-dev"
   },
+  "homepage": "https://github.com/zhangleqi04-dev/canvas-ddl",
+  "repository": "https://github.com/zhangleqi04-dev/canvas-ddl",
   "license": "MIT",
   "keywords": [
     "canvas-lms",
