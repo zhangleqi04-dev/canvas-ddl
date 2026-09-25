@@ -1,0 +1,21 @@
+{
+  "documents": [
+    {
+      "document_id": "cs3244-outline-2026",
+      "course_id": "12345",
+      "course_code": "CS3244",
+      "course_name": "Machine Learning",
+      "document_name": "Course Outline 2026.pdf",
+      "document_kind": "course_outline",
+      "source_url": "https://your-institution.instructure.com/courses/12345/files/67890",
+      "path": "Course Outline 2026.pdf",
+      "sha256": "replace-with-the-64-character-lowercase-approved-sha256",
+      "approved_by": "replace-after-human-source-and-course-period-review",
+      "valid_from": "2026-08-01",
+      "valid_until": "2026-12-31",
+      "active": true,
+      "auto_refresh": false,
+      "refresh_blocked": false
+    }
+  ]
+}

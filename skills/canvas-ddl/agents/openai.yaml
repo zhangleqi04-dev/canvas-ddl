@@ -1,0 +1,4 @@
+interface:
+  display_name: "Canvas DDL"
+  short_description: "查询实时 Canvas 与已验证官方课程文档中的 DDL，保留证据、位置和来源冲突"
+  default_prompt: "使用 $canvas-ddl 查询我下周的作业和考试，注明来源及数据是否完整。"

@@ -1,0 +1,31 @@
+{
+  "name": "canvas-ddl",
+  "version": "0.10.0",
+  "description": "Query Canvas and validated official course documents for deadlines with source-aware reconciliation.",
+  "author": {
+    "name": "Canvas DDL Contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "canvas-lms",
+    "deadlines",
+    "education",
+    "codex-skill"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Canvas DDL",
+    "shortDescription": "Query verified Canvas and course-document deadlines",
+    "longDescription": "Combines live Canvas records with pre-ingested, validated official course documents, reconciles conflicts, and returns deadline counts with provenance and completeness status.",
+    "developerName": "Canvas DDL Contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Use $canvas-ddl to show my deadlines for next week.",
+      "Use $canvas-ddl to find which courses have midterm exams."
+    ],
+    "brandColor": "#E66000"
+  }
+}
