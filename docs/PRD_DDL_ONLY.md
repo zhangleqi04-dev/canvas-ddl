@@ -1,6 +1,6 @@
 # PRD — Multi-source Canvas DDL Assistant
 
-**Status:** Implemented contract v0.12.3 · 2026-09-26
+**Status:** Implemented contract v0.12.4 · 2026-09-26
 **Deployment:** single-user, local, read-only Canvas PAT  
 **Interface:** Codex Skill / CLI; MCP optional and deferred
 
@@ -290,10 +290,13 @@ log or include it/auth headers in model-facing data. Canvas performs GET only;
 local ingestion writes only its evidence store. Allowlisting a document download host never
 exposes an arbitrary authenticated HTTP capability to Codex.
 
-Keep sufficient-evidence queries lightweight; unchanged files must not be reparsed.
+Keep every scoped freshness check lightweight; unchanged files must not be reparsed.
 No query-time OCR/model calls or full-account sync. OCR runs only while ingesting
-new/changed low-text PDF pages or image inputs and cached artifacts serve later queries. A document-dependent refresh may
-take longer than the fast path. Course lookup <3s/common DDL queries <5s are targets.
+new/changed low-text PDF pages or image inputs and cached artifacts serve later queries.
+Query latency depends on selected-course count, Canvas inventory response time and the
+number of changed documents; do not claim a fixed latency target without measured evidence.
+Security reports follow the repository [security policy](../SECURITY.md) and must not
+place credentials, signed URLs, private course documents or student data in public Issues.
 
 ## Acceptance and required tests
 

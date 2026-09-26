@@ -1,0 +1,92 @@
+name: Bug report
+description: Report reproducible incorrect behavior in Canvas DDL.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Do not paste Canvas tokens, `.env` contents,
+        signed download URLs, private course documents, student data, or unredacted logs.
+        Security vulnerabilities must use the private reporting link in `SECURITY.md`.
+
+  - type: input
+    id: version
+    attributes:
+      label: Canvas DDL version
+      description: Run `canvas-ddl --version` and paste only the version number.
+      placeholder: e.g. 0.12.x
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - Deadline query or count
+        - Course document refresh or ingestion
+        - PDF/OCR or another document format
+        - Time interpretation
+        - Installation or configuration
+        - Codex Skill presentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the incorrect behavior without private course content.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: List the smallest safe sequence of steps. Use synthetic or redacted examples.
+      placeholder: |
+        1. Run ...
+        2. Query ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Include status, complete, file_library_check and relevant warning codes only when safe.
+      render: text
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Safety checks
+      options:
+        - label: I searched existing Issues for the same problem.
+          required: true
+        - label: I removed tokens, `.env` values, signed URLs, student data and private course content.
+          required: true
+        - label: This is not a security vulnerability requiring private reporting.
+          required: true

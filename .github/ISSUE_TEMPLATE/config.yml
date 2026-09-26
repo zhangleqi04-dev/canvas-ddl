@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/zhangleqi04-dev/canvas-ddl/security/advisories/new
+    about: Use private reporting and do not disclose credentials or exploit details publicly.
+  - name: Read the security policy
+    url: https://github.com/zhangleqi04-dev/canvas-ddl/blob/main/SECURITY.md
+    about: Review supported versions, reporting steps and sensitive-data guidance.

@@ -9,13 +9,14 @@ Python 引擎负责事实、验证、来源优先级、分类、去重与计数�
 
 默认所有 DDL 查询都会检查选中课程的全部可访问受支持文档以及 Canvas Syllabus/Pages，
 即使 Canvas 或本地证据已经返回完整正结果，也会先核对文件清单和版本。这样宽泛 DDL 查询
-不会漏掉 PDF-only 考试，已有文档日期也不会因 positive fast path 而跳过更新。认证 Canvas API 返回的课程文件会按课程 ID、文件 ID 和内容哈希自动登记；
+不会漏掉 PDF-only 考试，已有结果也不会导致系统跳过文档版本检查。认证 Canvas API 返回的课程文件会按课程 ID、文件 ID 和内容哈希自动登记；
 同一文件的后续版本自动更新并重新 ingestion，无需人工批准。外部链接和手工本地文件仍需维护者建立信任记录。
 相同版本复用本地证据，旧文件消失或已知变更无法纳入时，旧日期会被停用。
 
-显式查询上传文档/最新文件时加 `--document-mode refresh`；需要仅使用当前证据时
-加 `--document-mode existing`。结果的 file_library_check 显示检查/跳过、更新、
-待审核及失败信息。文件库访问失败会明确返回 partial，不声称已检查最新课程文档。
+显式强制检查文件时可加 `--document-mode refresh`；需要仅使用当前证据时
+加 `--document-mode existing`。默认 `auto` 与 `refresh` 都会检查所选课程的文件清单；
+`existing` 不检查且 `file_library_check` 为 null。检查结果会显示更新、待审核及失败信息。
+文件库访问失败会明确返回 partial，不声称已检查最新课程文档。
 
 ## 跨平台安装
 
@@ -196,7 +197,7 @@ schema/规则版本，不代表项目发布版本。
 
 默认测试为离线模拟数据与生成的 PDF，不需要真实 token。
 [PRD](docs/PRD_DDL_ONLY.md)、[Architecture](docs/ARCHITECTURE.md)、
-[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.12.3。
+[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.12.4。
 本地验证记录可能包含私有课程信息，因此不提交到公开仓库。
 
 PDF parser 依据 [pypdf 官方文档](https://pypdf.readthedocs.io/en/stable/user/extract-text.html)；
@@ -209,11 +210,11 @@ OCR 依据 [PaddleOCR 官方安装说明](https://www.paddleocr.ai/main/en/versi
 常驻显存。Windows CPU 运行时固定使用 PaddlePaddle 3.2.x；3.3.1 已知在该组合上
 可能触发 oneDNN 不支持的算子。
 
-## 全课程文档考试检查
+## 全课程文档检查
 
-“下周有什么考试/几门考试”自动检查所选课程的所有受支持文档，不按文件名筛选，也没有
+所有自动 DDL 查询都会检查所选课程的受支持文档，不按文件名筛选，也没有
 默认20份上限。上述 prepare-documents 是单独的显式维护命令，其文件名提示与20份
-默认限制不适用于自动考试查询。Files 禁止访问时尝试 Modules 文件链接，并标为部分
+默认限制不适用于自动查询。Files 禁止访问时尝试 Modules 文件链接，并标为部分
 覆盖；访问、下载、解析及空白页失败均保留，不声称已经成功读完所有文件。
 
 认证 Canvas API 返回的新 PDF、DOCX、PPTX、XLSX、CSV、文本、RTF、HTML 和图片会
@@ -228,3 +229,10 @@ OCR 依据 [PaddleOCR 官方安装说明](https://www.paddleocr.ai/main/en/versi
 相关的未确认证据不会因为已有 confirmed 考试而被隐藏；练习卷、示例、统计检验、
 教学内容、仅有评分权重及取消/否定语境仍不会作为可能的考试安排展示。
 PDF 解析支持能以空用户密码正常打开的 AES 文件；需要实际密码的文件仍安全失败。
+
+## 问题反馈与安全
+
+普通缺陷和功能建议请使用 GitHub 的结构化
+[Issue 表单](https://github.com/zhangleqi04-dev/canvas-ddl/issues/new/choose)。安全问题请按
+[SECURITY.md](SECURITY.md) 私下报告，不要在公开 Issue 中粘贴 Canvas token、`.env`、
+签名下载链接、学生数据、私人课程文档或未脱敏日志。

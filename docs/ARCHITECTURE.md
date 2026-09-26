@@ -1,6 +1,6 @@
 # ARCHITECTURE — Multi-source Deadline Engine
 
-**Contract v0.12.3 · 2026-09-26**. Product: [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md).
+**Contract v0.12.4 · 2026-09-26**. Product: [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md).
 Rules: [AGENTS.md](AGENTS.md). Runtime Skill: [../skills/canvas-ddl/SKILL.md](../skills/canvas-ddl/SKILL.md).
 
 ## Document preparation interface

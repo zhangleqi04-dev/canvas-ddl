@@ -1,0 +1,61 @@
+name: Feature request
+description: Propose a focused improvement to Canvas DDL.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explain the deadline-management problem first. Do not include Canvas tokens,
+        private course documents, student data or other credentials.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What user workflow is difficult or unreliable today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the observable result, including evidence and completeness expectations.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Primary area
+      options:
+        - Canvas structured data
+        - Course document ingestion
+        - Deadline validation or reconciliation
+        - Time interpretation
+        - Codex Skill presentation
+        - Installation or documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Example
+      description: Use a synthetic or fully redacted example showing the desired input and output.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing Issues and documentation for this request.
+          required: true
+        - label: The example contains no token, signed URL, student data or private course content.
+          required: true
