@@ -19,7 +19,7 @@ def evidence_title(text: str) -> str:
 
 
 class DeadlineExtractor:
-    """Rule-based default; injectable LLM extractors must return this same schema."""
+    """Legacy rule prefilter retained for migration diagnostics, never runtime authority."""
     def extract(self, parsed, document) -> tuple[DeadlineCandidate, ...]:
         result = []
         for page in parsed.pages:

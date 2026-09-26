@@ -125,7 +125,7 @@ PNG/JPEG/WebP/TIFF/BMP。Canvas Syllabus 和已发布 Pages 也会在刷新阶�
 canvas-ddl approve-document --document canvas-12345-67890 --approved-by "你的姓名" --valid-from "YYYY-MM-DD" --valid-until "YYYY-MM-DD" --confirm-official
 ```
 
-此命令批准待审核记录、保留其他已登记文件，然后自动运行 ingestion；重复准备
+此命令批准待审核记录、保留其他已登记文件，然后解析并生成 Codex 语义审核任务；重复准备
 不会覆盖已有批准。auto_refresh=false 的变更版本需审核；true 只授权原文件 ID 的
 后续版本，不会批准新的来源。pending 文件中的 active=false、
 空 approved_by 和未知教学期间会阻止它直接参与查询。不要让 Codex代替你填写批准。
@@ -165,14 +165,21 @@ refresh_blocked=true 会将已知过期的版本排除查询。允许同源更�
 这份登记是受信任的本地管理配置；填写 URL 本身不能证明本地文件真的来自该地址。
 
 ```text
-DocumentParser → DeadlineExtractor → DeadlineCandidate → DeadlineValidator
-→ SQLite 文档证据（pages、proposals、validation audit）
+DocumentParser → StructuralChunker → LightSemanticPrefilter → Codex semantic extractor
+→ SemanticDeadlineCandidate → Python DeadlineValidator
+→ SQLite 文档证据（source units、semantic reviews、proposals、validation audit）
 ```
 
-默认 extractor 为规则式；可注入 LLM proposal extractor，但其候选不能直接成为事实。
-validator 独立核对整行原文、页码、标题、明确日期/年份/时刻、截止或安排语义、
-课程和已批准内容版本。最终查询读取持久化证据并重新验证；此前更新阶段仅在需要
+运行时不再用“关键词命中 + 整段只能有一个日期”决定事实。Python 生成有位置和哈希的
+结构块，Codex Skill 按严格 JSON 语义识别实际安排、统计术语、示例、否定和多个事件，
+并为每个逻辑事件选择原文中的精确证据及日期。validator 独立核对原文锚点、位置、
+页码、明确日期/年份/时刻、类型/角色枚举、课程和已批准内容版本。Codex 不能批准来源、
+补全缺失日期、决定冲突或计数。最终查询读取持久化证据并重新验证；此前更新阶段仅在需要
 入库新内容时解析 PDF，未变更的文档不会每次重新解析。
+
+当查询结果出现 `semantic_review_required=true` 时，`$canvas-ddl` 会分批调用
+`semantic-review-requests`，生成逐块审核 JSON，通过 `semantic-ingest` 交回 Python，
+完成后重跑原查询。审核未完成时，该文档的 deadline 会被暂时扣留，结果保持 partial。
 
 当前支持 ISO yyyy-mm-dd、中文完整年月日、英文完整/缩写月份日期及单个 24 小时
 HH:MM。无年份、暂定/否定、多个日期或时刻、复杂表格布局、AM/PM/外部时区等需要
@@ -183,7 +190,7 @@ reference_deadlines 参考日期范围。该范围不进入确认 count，也不
 calendar。ICS 仅接受同源 Canvas 课程 feed、请求不携带 API token、URL 不写入结果。
 扫描版或
 文字层不足的页面在 ingestion 时使用本地 PP-OCRv6 Small；普通文字 PDF 不启动 OCR。
-OCR 只提供带页码与置信度的文字，仍须经过同一个规则 extractor 和独立 validator。
+OCR 只提供带页码与置信度的文字，仍须经过同一个 Codex 语义审核和独立 validator。
 低于阈值的日期保留为 unresolved；依赖、模型或推理失败会标记覆盖不完整。
 
 ## 查询结果与冲突
@@ -223,7 +230,7 @@ python -m pytest -q
 
 默认测试为离线模拟数据与生成的 PDF，不需要真实 token。
 [PRD](docs/PRD_DDL_ONLY.md)、[Architecture](docs/ARCHITECTURE.md)、
-[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.10。
+[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.11。
 本地验证记录可能包含私有课程信息，因此不提交到公开仓库。
 
 PDF parser 依据 [pypdf 官方文档](https://pypdf.readthedocs.io/en/stable/user/extract-text.html)；

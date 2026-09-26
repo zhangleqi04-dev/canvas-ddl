@@ -140,16 +140,17 @@ class DeadlineNormalizer:
                                     document.document_id, document.document_name, candidate.page, candidate.evidence_text,
                                     document.sha256, parsed.parsed_at, info, value, validation.value_kind, validation.date_only,
                                     page.extraction_mode, page.ocr_engine, confidence, candidate.location)
-        fallback = "event" if validation.value_kind == "start_at" else "assignment"
-        if re.search(r"\bquiz\b|小测|测验", candidate.title, re.I):
+        fallback = candidate.deadline_type or ("event" if validation.value_kind == "start_at" else "assignment")
+        if candidate.deadline_type is None and re.search(r"\bquiz\b|小测|测验", candidate.title, re.I):
             fallback = "quiz"
-        elif re.search(r"\bdiscussion\b|讨论", candidate.title, re.I):
+        elif candidate.deadline_type is None and re.search(r"\bdiscussion\b|讨论", candidate.title, re.I):
             fallback = "discussion"
         return Deadline(deadline_id=f"course_{course.course_id}_document_{candidate.candidate_id}",
                         canvas_resource_id=None, course_id=course.course_id, course_code=course.course_code,
                         course_name=course.course_name, title=candidate.title, type=fallback,
                         start_at=value if validation.value_kind == "start_at" else None,
-                        due_at=value if validation.value_kind == "due_at" else None, end_at=None,
+                        due_at=value if validation.value_kind == "due_at" else None,
+                        end_at=value if validation.value_kind == "end_at" else None,
                         submission_status="unknown", source_type="official_document", source_url=url,
                         last_verified_at=validation.validated_at, sources=(reference,),
                         all_day_date=value.date() if validation.date_only else None, date_only=validation.date_only,

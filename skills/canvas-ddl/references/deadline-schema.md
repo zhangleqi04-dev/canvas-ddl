@@ -23,6 +23,9 @@ and candidate issues. unresolved_deadlines holds unresolved identity/source
 conflicts, with evidence, but never contributes to count.
 document_summary additionally exposes source_url and valid_from/valid_until;
 candidate issues expose original evidence_text and validation rule/time.
+Approved document summaries also expose semantic_review_required,
+semantic_review_schema, semantic_review_total/reviewed/pending. While pending is
+nonzero, that document's deadline candidates are withheld and the result is partial.
 
 reference_deadlines is a separate high-recall list for persisted Week N evidence
 bounded by full-term Canvas Calendar Events or official course ICS anchors.
@@ -71,8 +74,11 @@ Do not infer missing from time or submitted from offline grading alone.
 ## Ingestion and authority
 
 Operator-approved official course-document registry is separate from extraction.
-Ingestion parses once, extracts candidates, validates literal source-location evidence/explicit date/
-course/content version/role, then persists parsed evidence and validation audit.
+Ingestion parses and structurally chunks once. Codex reviews bounded untrusted chunks
+with the strict `codex-semantic-v1` schema, using exact title/evidence/date substrings
+and one event per logical date. Python validates literal source-location evidence,
+selected explicit date, course/content version/role/enums, then persists parsed text,
+the full review audit, candidates and validation results.
 Only confirmed candidates become Deadline. Default document_mode=auto first uses
 existing evidence, always checks all scoped supported documents and Canvas Syllabus/Pages for exam queries, allows complete
 positive non-exam results directly, and checks the
@@ -81,12 +87,16 @@ never checks. Authorized same-file versions may be re-ingested in the update sta
 final queries revalidate persisted evidence without source-document parsing. Unchanged files
 are reused. New source IDs remain pending. Changed unauthorized/disappeared/known
 failed new versions set refresh_blocked and withhold old facts. Week expressions and
-low-confidence OCR remain unresolved at ingestion. A deterministic query-time
+low-confidence OCR remain unresolved at ingestion. Missing Codex reviews withhold
+the document rather than falling back to keyword facts. A deterministic query-time
 TeachingWeekResolver can bound one Week N expression from Canvas Calendar Events or
 the engine's safe official course ICS fallback as a ReferenceDeadline only; it never
 promotes it into canonical count. Empty scanned pages,
 missing ingestion, changed versions and unresolved/rejected coverage make the
 query partial. No unreviewed filename/URL/LLM confidence grants source authority.
+Final queries also parse the stored strict reviews again and require them to rebuild
+the exact stored candidate set. Any missing, extra or altered review/candidate row
+withholds that document and reports invalid persisted semantic review.
 
 ## Errors
 
@@ -94,6 +104,8 @@ Safe error.code/message. AMBIGUOUS_COURSE also gives candidates. Retain prior
 Canvas/time/query/config codes, plus INVALID_DOCUMENT_REGISTRY,
 DOCUMENT_NOT_REGISTERED, DOCUMENT_COURSE_MISMATCH, DOCUMENT_HASH_MISMATCH,
 DOCUMENT_PARSE_FAILED, DOCUMENT_STORE_UNAVAILABLE and INVALID_DOCUMENT_EXTRACTION.
+Semantic review additionally uses INVALID_SEMANTIC_REVIEW and may report
+DOCUMENT_NOT_INGESTED.
 401 aborts; other source failures can yield partial document/Canvas facts. No
 stale Canvas cache fallback. Canonical details use the same reconciliation policy.
 

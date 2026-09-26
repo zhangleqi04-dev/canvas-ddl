@@ -8,16 +8,21 @@ from canvas_ddl.deadlines.normalizer import DeadlineNormalizer
 from .parser import DocumentParser
 from .extractor import DeadlineExtractor
 from .models import ParsedDocument, RelativeWeekEvidence
+from .semantic import CodexSemanticExtractor, LightSemanticPrefilter, StructuralChunker, request_batch
 
 
 class DocumentIngestionService:
     def __init__(self, registry, repository, *, timezone, base_url, clock, parser=None, extractor=None,
-                 ocr_min_confidence=0.90):
+                 ocr_min_confidence=0.90, require_semantic_review=False):
         self.registry, self.repository, self.clock = registry, repository, clock
         self.parser = parser or DocumentParser()
         self.extractor = extractor or DeadlineExtractor()
         self.validator = DeadlineValidator(timezone, ocr_min_confidence=ocr_min_confidence)
         self.normalizer = DeadlineNormalizer(base_url, timezone)
+        self.require_semantic_review = require_semantic_review
+        self.semantic_extractor = CodexSemanticExtractor()
+        self.chunker = StructuralChunker()
+        self.semantic_prefilter = LightSemanticPrefilter()
         from .scan import DocumentScanService
         self.scanner = DocumentScanService(self)
 
@@ -26,18 +31,82 @@ class DocumentIngestionService:
         if document.course_id != course.course_id or document.course_code != course.course_code:
             raise ApplicationError("DOCUMENT_COURSE_MISMATCH", "The registered document does not match the current resolved course.")
         parsed = self.parser.parse(document, now=self.clock())
-        candidates = self.extractor.extract(parsed, document)
+        # Runtime semantic mode never uses keyword extraction as a factual stage.
+        # Keep the legacy extractor only for migration/tests and provisional diagnostics.
+        candidates = () if self.require_semantic_review else self.extractor.extract(parsed, document)
         if len(candidates) > 2000 or len({c.candidate_id for c in candidates}) != len(candidates):
             raise ApplicationError("INVALID_DOCUMENT_EXTRACTION", "The extractor returned too many or duplicate candidate IDs.")
         validations = tuple(self.validator.validate_candidate(c, parsed, document, now=self.clock()) for c in candidates)
         self.repository.save(parsed, candidates, validations, course.course_id)
+        semantic_requests = self._semantic_requests(parsed, document) if self.require_semantic_review else ()
         return {"document_id": document_id, "document_name": document.document_name, "sha256": parsed.sha256,
                 "pages": len(parsed.pages), "ingested_at": parsed.parsed_at.isoformat(),
+                "confirmed": 0 if self.require_semantic_review else sum(v.status == "confirmed" for v in validations),
+                "unresolved": len(semantic_requests) if self.require_semantic_review else sum(v.status == "unresolved" for v in validations),
+                "rejected": 0 if self.require_semantic_review else sum(v.status == "rejected" for v in validations),
+                "legacy_rule_candidates": len(candidates),
+                "ocr_pages": [p.page for p in parsed.pages if p.extraction_mode == "ocr_ppocrv6_small"],
+                "semantic_review_required": bool(semantic_requests),
+                "semantic_review_total": len(semantic_requests),
+                "warnings": [self._page_warning(p) for p in parsed.pages if self._page_warning(p)]}
+
+    def semantic_review_requests(self, document_id, course, *, offset=0, limit=20):
+        if type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 50:
+            raise ApplicationError("INVALID_QUERY", "Semantic review offset/limit are invalid.")
+        document = self.registry.get(document_id)
+        if document.course_id != course.course_id or document.course_code != course.course_code:
+            raise ApplicationError("DOCUMENT_COURSE_MISMATCH", "The registered document does not match the current resolved course.")
+        loaded = self.repository.load(document)
+        if loaded is None or loaded[0].parser_version != ParsedDocument.__dataclass_fields__["parser_version"].default:
+            self.ingest(document_id, course)
+            loaded = self.repository.load(document)
+        parsed, rows = loaded
+        requests = self._semantic_requests(parsed, document)
+        reviewed = self.repository.load_semantic_reviews(document)
+        _requests, _reviews, _semantic_rows, issue = self._semantic_artifact(parsed, document, rows)
+        if issue == "invalid":
+            self.ingest(document_id, course)
+            parsed, rows = self.repository.load(document)
+            requests = self._semantic_requests(parsed, document)
+            reviewed = {}
+        pending = tuple(request for request in requests if request.request_id not in reviewed)
+        batch = request_batch(document, parsed, pending, offset=offset, limit=limit)
+        batch["reviewed"] = len(reviewed)
+        batch["document_total"] = len(requests)
+        batch["complete"] = not pending
+        return batch
+
+    def apply_semantic_review(self, document_id, course, payload):
+        document = self.registry.get(document_id)
+        if document.course_id != course.course_id or document.course_code != course.course_code:
+            raise ApplicationError("DOCUMENT_COURSE_MISMATCH", "The registered document does not match the current resolved course.")
+        loaded = self.repository.load(document)
+        if loaded is None:
+            raise ApplicationError("DOCUMENT_NOT_INGESTED", "Parse the approved document before applying semantic review.")
+        parsed, _ = loaded
+        if parsed.parser_version != ParsedDocument.__dataclass_fields__["parser_version"].default:
+            raise ApplicationError("DOCUMENT_NOT_INGESTED", "Re-parse the approved document before applying semantic review.")
+        requests = self._semantic_requests(parsed, document)
+        batch_reviews, _ = self.semantic_extractor.parse_batch(
+            payload, document=document, parsed=parsed, requests=requests,
+        )
+        reviews = self.repository.load_semantic_reviews(document)
+        reviews.update(batch_reviews)
+        combined = {"schema_version": "codex-semantic-v1", "document_id": document.document_id,
+                    "document_sha256": parsed.sha256, "reviews": list(reviews.values())}
+        reviews, candidates = self.semantic_extractor.parse_batch(
+            combined, document=document, parsed=parsed, requests=requests,
+        )
+        validations = tuple(self.validator.validate_candidate(candidate, parsed, document, now=self.clock())
+                            for candidate in candidates)
+        self.repository.save_semantic(parsed, candidates, validations, reviews, course.course_id)
+        complete = {request.request_id for request in requests} == set(reviews)
+        return {"document_id": document_id, "document_name": document.document_name,
+                "schema_version": "codex-semantic-v1", "reviewed": len(reviews),
+                "total": len(requests), "complete": complete,
                 "confirmed": sum(v.status == "confirmed" for v in validations),
                 "unresolved": sum(v.status == "unresolved" for v in validations),
-                "rejected": sum(v.status == "rejected" for v in validations),
-                "ocr_pages": [p.page for p in parsed.pages if p.extraction_mode == "ocr_ppocrv6_small"],
-                "warnings": [self._page_warning(p) for p in parsed.pages if self._page_warning(p)]}
+                "rejected": sum(v.status == "rejected" for v in validations)}
 
     @staticmethod
     def _page_warning(page):
@@ -49,6 +118,33 @@ class DocumentIngestionService:
         if not page.text.strip():
             return f"{label}: no usable text was extracted."
         return None
+
+    def _semantic_requests(self, parsed, document):
+        return self.semantic_prefilter.filter(self.chunker.chunk(parsed, document))
+
+    def _semantic_artifact(self, parsed, document, rows):
+        """Rebuild stored proposals from strict reviews; never trust completeness flags alone."""
+        requests = self._semantic_requests(parsed, document)
+        reviews = self.repository.load_semantic_reviews(document)
+        request_ids = {request.request_id for request in requests}
+        review_ids = set(reviews)
+        if review_ids - request_ids:
+            return requests, reviews, None, "invalid"
+        if request_ids - review_ids:
+            return requests, reviews, None, "incomplete"
+        payload = {"schema_version": "codex-semantic-v1", "document_id": document.document_id,
+                   "document_sha256": parsed.sha256, "reviews": list(reviews.values())}
+        try:
+            _validated_reviews, expected = self.semantic_extractor.parse_batch(
+                payload, document=document, parsed=parsed, requests=requests,
+            )
+        except ApplicationError:
+            return requests, reviews, None, "invalid"
+        stored = {candidate.candidate_id: (candidate, validation) for candidate, validation in rows}
+        if len(stored) != len(rows) or {candidate.candidate_id: candidate for candidate in expected} != {
+                key: value[0] for key, value in stored.items()}:
+            return requests, reviews, None, "invalid"
+        return requests, reviews, tuple((candidate, stored[candidate.candidate_id][1]) for candidate in expected), None
 
     def load_deadlines(self, courses):
         course_map = {c.course_id: c for c in courses}
@@ -81,6 +177,30 @@ class DocumentIngestionService:
                 summary.append(info)
                 continue
             info["ingested_at"] = parsed.parsed_at.isoformat()
+            semantic_requests = self._semantic_requests(parsed, document) if self.require_semantic_review else ()
+            semantic_reviews = self.repository.load_semantic_reviews(document) if self.require_semantic_review else {}
+            if self.require_semantic_review:
+                semantic_requests, semantic_reviews, semantic_rows, semantic_issue = self._semantic_artifact(
+                    parsed, document, rows,
+                )
+                missing = [request for request in semantic_requests if request.request_id not in semantic_reviews]
+                info.update({"semantic_review_required": semantic_issue is not None,
+                             "semantic_review_schema": "codex-semantic-v1",
+                             "semantic_review_total": len(semantic_requests),
+                             "semantic_reviewed": len(semantic_reviews),
+                             "semantic_review_pending": len(missing)})
+                if semantic_issue is not None:
+                    complete = False
+                    info["state"] = "semantic_review_required"
+                    info["candidate_issues"].append({"status": "unresolved",
+                        "reasons": ["INVALID_PERSISTED_SEMANTIC_REVIEW" if semantic_issue == "invalid"
+                                    else "CODEX_SEMANTIC_REVIEW_REQUIRED"],
+                        "pending_chunks": len(missing)})
+                    warning = "is invalid" if semantic_issue == "invalid" else "is incomplete"
+                    warnings.append(f"Official document {document.document_id}: Codex semantic review {warning}; document deadlines withheld.")
+                    summary.append(info)
+                    continue
+                rows = semantic_rows
             incomplete_pages = [p for p in parsed.pages if not p.text.strip()
                                 or p.extraction_mode in ("ocr_unavailable", "ocr_failed", "ocr_empty")]
             if incomplete_pages:
@@ -91,6 +211,16 @@ class DocumentIngestionService:
                 # Re-run independent checks on the persisted page evidence, never
                 # parse the source document during a deadline query or trust a stored LLM flag.
                 validation = self.validator.validate_candidate(candidate, parsed, document, now=parsed.parsed_at)
+                if self.require_semantic_review and candidate.extractor != "codex-semantic-v1":
+                    complete = False
+                    info["unresolved"] += 1
+                    info["candidate_issues"].append({"candidate_id": candidate.candidate_id,
+                        "page": candidate.page, "location": candidate.location, "title": candidate.title,
+                        "status": "unresolved", "reasons": ["CODEX_SEMANTIC_REVIEW_REQUIRED"],
+                        "evidence_text": candidate.evidence_text,
+                        "validation_rule_version": validation.rule_version,
+                        "validated_at": validation.validated_at.isoformat()})
+                    continue
                 if stored.get("rule_version") != validation.rule_version:
                     complete = False
                     warnings.append(f"Official document {document.document_id}: validator changed; re-ingestion required.")
@@ -186,7 +316,14 @@ class DocumentIngestionService:
             parsed, rows = loaded
             if parsed.parser_version != ParsedDocument.__dataclass_fields__["parser_version"].default:
                 continue
+            if self.require_semantic_review:
+                _requests, _reviews, semantic_rows, issue = self._semantic_artifact(parsed, document, rows)
+                if issue is not None:
+                    continue
+                rows = semantic_rows
             for candidate, stored in rows:
+                if self.require_semantic_review and candidate.extractor != "codex-semantic-v1":
+                    continue
                 validation = self.validator.validate_candidate(candidate, parsed, document, now=parsed.parsed_at)
                 if stored.get("rule_version") != validation.rule_version:
                     continue

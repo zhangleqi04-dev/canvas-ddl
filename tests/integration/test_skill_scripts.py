@@ -13,6 +13,8 @@ SCRIPTS = ROOT / "skills" / "canvas-ddl" / "scripts"
 @pytest.mark.parametrize("script,args", [
     ("deadlines.py", ["--bad-option"]), ("upcoming.py", ["--bad-option"]),
     ("courses.py", ["--bad-option"]), ("deadline_details.py", []),
+    ("semantic_review_requests.py", ["--bad-option"]),
+    ("semantic_ingest.py", ["--bad-option"]),
 ])
 def test_scripts_json_error_no_network(script, args, tmp_path):
     result = subprocess.run([sys.executable, "-X", "utf8", str(SCRIPTS / script), *args],

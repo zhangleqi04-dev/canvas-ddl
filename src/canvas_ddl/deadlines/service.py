@@ -386,6 +386,20 @@ class DeadlineService:
         courses = self.list_courses(document.course_id)
         return self.document_ingestion.ingest(document_id, courses[0])
 
+    def semantic_review_requests(self, document_id, *, offset=0, limit=20):
+        if self.document_ingestion is None:
+            raise ApplicationError("INVALID_CONFIG", "Official document ingestion is not configured.")
+        document = self.document_ingestion.registry.get(document_id)
+        courses = self.list_courses(document.course_id)
+        return self.document_ingestion.semantic_review_requests(document_id, courses[0], offset=offset, limit=limit)
+
+    def apply_semantic_review(self, document_id, payload):
+        if self.document_ingestion is None:
+            raise ApplicationError("INVALID_CONFIG", "Official document ingestion is not configured.")
+        document = self.document_ingestion.registry.get(document_id)
+        courses = self.list_courses(document.course_id)
+        return self.document_ingestion.apply_semantic_review(document_id, courses[0], payload)
+
     def list_documents(self):
         if self.document_ingestion is None:
             return []

@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from canvas_ddl.documents.extractor import DATE_PATTERN, MONTHS, evidence_title, ITEM_PATTERN
 from canvas_ddl.documents.models import CandidateValidation
 from canvas_ddl.canvas.errors import ApplicationError
-from .models import Deadline, ValidationInfo
+from .models import Deadline, ValidationInfo, TYPES
 from .time_range import aware
 
 UNCERTAIN = re.compile(r"\b(?:may|might|tentative|approximately|around|TBA|TBC|not|cancelled|canceled)\b|可能|待定|暂定|大约|取消|不在", re.I)
@@ -45,11 +45,25 @@ class DeadlineValidator:
         page_objects = {p.page: p for p in parsed.pages}
         pages = {number: page.text for number, page in page_objects.items()}
         text = candidate.evidence_text
-        if (candidate.page not in pages or candidate.location != page_objects[candidate.page].location
-                or not text or text not in pages[candidate.page]
-                or text not in {line.strip() for line in pages.get(candidate.page, "").splitlines()}
-                or len(text) > 4000 or "\n" in text or not re.fullmatch(r"[a-f0-9]{24}", candidate.candidate_id)
-                or evidence_title(text) != candidate.title or not ITEM_PATTERN.search(candidate.title)):
+        semantic = candidate.extractor == "codex-semantic-v1"
+        location_matches = candidate.location == page_objects[candidate.page].location if candidate.page in page_objects else False
+        if semantic and candidate.page in page_objects and candidate.location:
+            location_matches = candidate.location == page_objects[candidate.page].location or candidate.location.startswith(
+                f"{page_objects[candidate.page].location or f'unit {candidate.page}'}; chunk ")
+        common_invalid = (candidate.page not in pages or not location_matches or not text
+                          or text not in pages.get(candidate.page, "") or len(text) > 4000
+                          or not re.fullmatch(r"[a-f0-9]{24}", candidate.candidate_id))
+        semantic_invalid = semantic and (
+            candidate.review_id is None or not re.fullmatch(r"[a-f0-9]{24}", candidate.review_id)
+            or candidate.deadline_type not in TYPES or candidate.value_kind not in ("due_at", "start_at", "end_at")
+            or candidate.semantic_status not in ("scheduled", "ambiguous")
+            or candidate.title.casefold() not in text.casefold()
+        )
+        rule_invalid = not semantic and (
+            text not in {line.strip() for line in pages.get(candidate.page, "").splitlines()}
+            or "\n" in text or evidence_title(text) != candidate.title or not ITEM_PATTERN.search(candidate.title)
+        )
+        if common_invalid or semantic_invalid or rule_invalid:
             return verdict("rejected", "EVIDENCE_OR_TITLE_NOT_SUPPORTED")
         page = page_objects[candidate.page]
         if page.extraction_mode in ("ocr_unavailable", "ocr_failed"):
@@ -57,11 +71,14 @@ class DeadlineValidator:
         if page.extraction_mode == "ocr_ppocrv6_small":
             lines = [line.strip() for line in page.text.splitlines()]
             scores = page.line_confidences
-            matching = [scores[i] for i, line in enumerate(lines) if line == text and i < len(scores)]
+            evidence_lines = {line.strip() for line in text.splitlines() if line.strip()}
+            matching = [scores[i] for i, line in enumerate(lines) if line in evidence_lines and i < len(scores)]
             if not matching or max(matching) < self.ocr_min_confidence:
                 return verdict("unresolved", "OCR_CONFIDENCE_REQUIRES_REVIEW")
         if UNCERTAIN.search(text) or AVAILABILITY.search(text) or PAGE_QUALIFIER.search(pages[candidate.page]):
             return verdict("unresolved", "AMBIGUOUS_OR_NON_DEADLINE_TEXT")
+        if semantic and candidate.semantic_status == "ambiguous":
+            return verdict("unresolved", "SEMANTIC_REVIEW_AMBIGUOUS")
         relative_weeks = {int(a or b) for a, b in re.findall(
             r"\bweek\s*([1-9]|[12]\d|3[0-2])\b|第\s*([1-9]|[12]\d|3[0-2])\s*周", text, re.I)}
         if relative_weeks:
@@ -71,12 +88,13 @@ class DeadlineValidator:
                 return verdict("unresolved", "DEADLINE_ROLE_REQUIRED")
             return verdict("unresolved", "CANVAS_TEACHING_WEEK_REQUIRED")
         dates = list(DATE_PATTERN.finditer(text))
-        if len(dates) != 1 or candidate.date_expression != dates[0][0]:
-            return verdict("unresolved", "EXPLICIT_UNIQUE_DATE_REQUIRED")
-        if not (DUE.search(text) or SCHEDULED.search(candidate.title)):
+        selected = next((match for match in dates if match[0] == candidate.date_expression), None)
+        if (semantic and selected is None) or (not semantic and (len(dates) != 1 or selected is None)):
+            return verdict("unresolved", "EXPLICIT_GROUNDED_DATE_REQUIRED" if semantic else "EXPLICIT_UNIQUE_DATE_REQUIRED")
+        if not semantic and not (DUE.search(text) or SCHEDULED.search(candidate.title)):
             return verdict("unresolved", "DEADLINE_ROLE_REQUIRED")
         try:
-            day = parse_date(dates[0][0])
+            day = parse_date(selected[0])
             if not document.valid_from <= day <= document.valid_until:
                 return verdict("rejected", "OUTSIDE_APPROVED_COURSE_PERIOD")
             times = list(re.finditer(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)", text))
@@ -90,10 +108,14 @@ class DeadlineValidator:
             return verdict("rejected", "INVALID_LITERAL_DATE_OR_TIME")
         checks = ("OFFICIAL_REGISTRY", "APPROVED_CONTENT_HASH", "COURSE_SCOPE", "EXACT_PAGE_EVIDENCE",
                   "EXPLICIT_DATE", "DEADLINE_ROLE", "APPROVED_COURSE_PERIOD")
+        if semantic:
+            checks += ("CODEX_SEMANTIC_REVIEW", "EXACT_EVIDENCE_SPAN", "EXACT_DATE_ANCHOR")
         if page.extraction_mode == "ocr_ppocrv6_small":
             checks += ("OCR_PP_OCRV6_SMALL", "OCR_CONFIDENCE_THRESHOLD")
         return CandidateValidation("confirmed", checks,
-                                   now, value_at=value, value_kind="due_at" if DUE.search(text) else "start_at", date_only=not times)
+                                   now, value_at=value,
+                                   value_kind=candidate.value_kind if semantic else "due_at" if DUE.search(text) else "start_at",
+                                   date_only=not times)
 
     def validate_deadline(self, deadline: Deadline, *, now) -> Deadline:
         if not deadline.actionable_at or any(not aware(v) for v in (deadline.start_at, deadline.due_at, deadline.end_at, deadline.last_verified_at) if v is not None):

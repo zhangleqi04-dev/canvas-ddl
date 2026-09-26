@@ -1,6 +1,6 @@
 # ARCHITECTURE — Multi-source Deadline Engine
 
-**Contract v0.10 · 2026-09-25**. Product: [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md).
+**Contract v0.11 · 2026-09-26**. Product: [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md).
 Rules: [AGENTS.md](AGENTS.md). Runtime Skill: [../skills/canvas-ddl/SKILL.md](../skills/canvas-ddl/SKILL.md).
 
 ## Document preparation interface
@@ -69,8 +69,11 @@ call `DeadlineService`; domain code never imports CLI/Skill code.
 Maintenance ingestion path:
 DeadlineService.ingest_document(approved document_id)
   → OfficialDocumentRegistry → resolved current Course
-  → DocumentParser (format dispatch; local OCR where applicable) → DeadlineExtractor → DeadlineCandidate
-  → DeadlineValidator → DocumentRepository (SQLite ingestion artifacts)
+  → DocumentParser (format dispatch; local OCR where applicable) → StructuralChunker
+  → LightSemanticPrefilter (broad temporal anchors only; no deadline classification)
+  → bounded Codex Skill semantic review (`codex-semantic-v1`)
+  → SemanticDeadlineCandidate → DeadlineValidator
+  → DocumentRepository (parsed units + semantic review + validation audit)
 
 Query path:
 Codex semantic intent / CLI → DeadlineService
@@ -111,16 +114,19 @@ Codex semantic intent / CLI → DeadlineService
   page rendering and per-line confidence. It proposes page text and owns no facts.
 - `documents/refresh.py`: scoped library/version checks, pending discovery,
   standing authorized version updates, stale evidence blocking and query audit.
-- `documents/extractor.py`: bounded proposals, rule-based default; injectable
-  LLM extractor may use the same candidate schema. It cannot approve sources,
-  write confirmed facts, choose dates or source priority.
+- `documents/extractor.py`: legacy/high-recall rule prefilter retained for migration
+  and provisional diagnostics; it is not authoritative in runtime semantic mode.
+- `documents/semantic.py`: deterministic structural chunks, a broad temporal-anchor
+  prefilter, plus strict Codex review
+  schema. It verifies exact chunk/title/evidence/date anchoring before producing
+  candidates and supports several events/dates per chunk. Source text is untrusted.
 - `deadlines/validator.py`: independent literal/page/scope/version/date/role
   validation plus unified aware Deadline invariants.
 - `deadlines/teaching_weeks.py`: deterministic course-local Week N mapping from
   full-term Canvas Calendar Events or parsed official course ICS events. It never
   reads an external academic calendar, source document or natural-language prompt.
 - `documents/repository.py`: atomic per-document SQLite replacement of parsed
-  source units, candidate proposals and validation audit. SQL parameters are bound.
+  source units, semantic reviews, candidate proposals and validation audit. SQL parameters are bound.
 - `documents/ingestion.py`: ingestion orchestration and loading persisted evidence.
   Queries revalidate candidates against persisted text, never reopen source documents.
 - `deadlines/normalizer.py`: Canvas personal overrides and validated document
@@ -155,17 +161,23 @@ document atomically and persists unresolved/rejected proposals for review.
 
 ## Candidate validation
 
-Confirm only when scope/hash match, original evidence matches a complete literal
-line of the indicated parsed source unit/location, the title matches deterministic evidence
-parsing, exactly one explicit date/year is present, a due/scheduled role is clear,
-date/time is legal, and its date lies inside the approved course period.
-Proposal date text must match the literal date independently extracted by the
-validator. Store status, rule version, checks/reasons and timestamp.
+For Codex semantic candidates, confirm only when scope/hash match, title and evidence
+are exact substrings of the engine-issued chunk/source unit, the selected date text is
+an exact supported literal inside that evidence, role/type/status are allowed enums,
+date/time is legal, and the date lies inside the approved course period. One source
+chunk may contain multiple dates; Codex emits one event per logical schedule and
+Python validates each selected date independently. Ambiguous semantic status remains
+unresolved. Legacy candidates retain their stricter complete-line/exactly-one-date
+checks but are withheld when runtime semantic review is required. Store review schema,
+request ID, reason, status, rule version, checks/reasons and timestamp.
+At final query time, Python reparses the persisted strict review JSON and requires it
+to reproduce the exact persisted candidate set. Missing, extra or altered review or
+candidate rows make the semantic artifact invalid and withhold the document.
 
 Supported literal dates: ISO yyyy-mm-dd, yyyy年M月D日, day Month year and Month
 day, year (full/short English month names); optional single 24-hour HH:MM.
-The current strict grammar leaves multiple dates/times, AM/PM/foreign timezone,
-release/availability dates, negation/tentative wording and unknown layouts
+The current strict literal grammar still leaves multiple times, AM/PM/foreign timezone,
+unanchored dates, tentative wording and unknown layouts
 unresolved or rejected. Relative academic weeks remain unresolved ingestion
 candidates with reason `CANVAS_TEACHING_WEEK_REQUIRED`. Page-wide tentative/draft markers
 require review, and cropped quotes cannot hide qualifications. It does not infer a year from
@@ -268,7 +280,7 @@ counts are engine-provided, not LLM arithmetic.
 `live`/`live_partial`: no ingested document inventory in result. With document
 inventory use `live_with_ingested_documents`/`mixed_partial`. Document timestamps
 retain ingestion/validation semantics, never imply live document rereading. Partial
-includes failed sources, missing approved ingestion/version, empty pages,
+includes failed sources, missing approved ingestion/version, incomplete Codex semantic review, empty pages,
 unresolved/rejected candidate coverage and unresolved reconciliation. Resolved
 Canvas/document conflicts preserve warnings but do not invalidate a complete canonical count.
 

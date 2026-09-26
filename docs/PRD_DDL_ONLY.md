@@ -1,6 +1,6 @@
 # PRD — Multi-source Canvas DDL Assistant
 
-**Status:** Implemented contract v0.10 · 2026-09-25
+**Status:** Implemented contract v0.11 · 2026-09-26
 **Deployment:** single-user, local, read-only Canvas PAT  
 **Interface:** Codex Skill / CLI; MCP optional and deferred
 
@@ -69,16 +69,20 @@ parser. PDF pages and standalone/embedded presentation images may use local
 PP-OCRv6 Small when native text is insufficient:
 
 ```text
-approved registry → DocumentParser → DeadlineExtractor → DeadlineCandidate
-                  → DeadlineValidator → persisted ingestion evidence
-                                     → confirmed normalized Deadline
+approved registry → DocumentParser → StructuralChunker → broad temporal-anchor prefilter
+→ bounded Codex semantic review
+                  → SemanticDeadlineCandidate → DeadlineValidator
+                  → persisted review/validation evidence → confirmed normalized Deadline
 ```
 
-The shipped extractor is rule-based. Future/injected LLM extractors may propose
-candidates only; independent deterministic validation must still establish the
-literal title, source location, evidence text, explicit date/year/time, deadline role,
-course binding and approved document version/period. Extraction confidence never
-confirms a fact. `confirmed`, `unresolved`, `rejected` are distinct statuses.
+The runtime extractor is a two-stage Codex Skill protocol. Python creates bounded
+structural chunks without deciding whether a keyword is a deadline. Codex returns
+strict `codex-semantic-v1` reviews with exact title/evidence/date substrings and may
+emit several logical events from one chunk. Python independently verifies document,
+course, content hash, source location, exact evidence/date anchors, legal literal
+date/time, approved period, OCR threshold and allowed enums. Codex cannot approve a
+source, invent missing dates, choose source priority or count. Incomplete review
+withholds that document's deadline facts. `confirmed`, `unresolved`, `rejected` remain distinct.
 
 Every document-derived deadline preserves document ID/name/hash, original source
 URL, format-specific location (page, slide, paragraph, table row, sheet row, text
@@ -109,8 +113,10 @@ candidates and independent validation audit.
 Source/period approval is required before any proposal can become a Deadline.
 Provisional `DocumentDraft` period bounds are syntax-only placeholders, not authority.
 
-The update stage uses DocumentParser → DeadlineExtractor → DeadlineCandidate →
-DeadlineValidator before the final query. Existing approved sources use the approved
+The update stage uses DocumentParser → StructuralChunker → LightSemanticPrefilter → Codex semantic review →
+DeadlineCandidate → DeadlineValidator before the final query. A legacy rule extractor may
+produce provisional diagnostics during migration, but its output is withheld from runtime
+document facts until the hash-bound Codex review is complete. Existing approved sources use the approved
 store; unapproved scans use `data/documents.pending.sqlite3` (derived from the configured
 store path). Their candidates remain unresolved/rejected even if literal dates parse.
 Pending proposals and raw text excerpts never enter canonical counts. The engine also
@@ -168,11 +174,15 @@ logical deadline from inflating count. Reconciliation is not moved into the Skil
   explicit aware ISO timestamps, human-readable course reference or verified course IDs,
   type/status filters, optional limit and document_mode=auto/existing/refresh.
 - `upcoming(days=7, ...)`, `list_courses(course_reference=None)`, `get_deadline(id)`.
-- `ingest_document(document_id)` processes an already approved registry record;
+- `ingest_document(document_id)` parses an approved registry record and stages semantic review;
+  `semantic_review_requests(document_id)` returns bounded untrusted chunks and
+  `apply_semantic_review(document_id, payload)` validates/persists Codex review batches;
   `list_documents()` exposes inventory/validation/ingestion diagnostics.
-- Skill scripts: deadlines.py, upcoming.py, courses.py, deadline_details.py.
-- CLI: courses, deadlines, upcoming, deadline, documents, ingest, prepare-documents,
-  approve-document. deadlines/upcoming accept --document-mode.
+- Skill scripts: deadlines.py, upcoming.py, courses.py, deadline_details.py,
+  semantic_review_requests.py and semantic_ingest.py.
+- CLI additionally exposes semantic-review-requests and semantic-ingest; courses,
+  deadlines, upcoming, deadline, documents, ingest, prepare-documents and
+  approve-document remain. deadlines/upcoming accept --document-mode.
 
 Default timezone is Asia/Singapore. Codex understands time language and emits
 TimeIntent; Python validates it and computes the window using the real clock.
@@ -220,7 +230,7 @@ query-window inclusion or exam count follows from such references.
 Unsupported layout or time expressions remain unresolved rather than silently
 guessed. Scanned/image-only pages use local PP-OCRv6 Small during ingestion. OCR
 text is persisted with page, extraction mode, engine and line confidence. OCR is
-perception input, not authority: the ordinary extractor and independent validator
+perception input, not authority: Codex semantic review and the independent validator
 still run, and a candidate below the configured confidence threshold stays
 unresolved. OCR failures keep page/document coverage partial rather than dropping
 the failure or aborting unrelated readable pages.
@@ -280,7 +290,7 @@ Additionally verify:
 3. Canvas/document conflict selects live Canvas and preserves the alternative/evidence.
 4. Reconciliation before filtering prevents moved dates from leaving obsolete document hits.
 5. Ambiguous, relative-week, missing-year, forged location/text/scope/date proposals
-   cannot become confirmed facts, including proposals from an injected LLM extractor.
+   cannot become confirmed facts. Fabricated Codex spans/dates and incomplete review are rejected/withheld.
 6. Approved document hash/version/course binding and re-ingestion are enforced.
 7. Existing evidence queries continue without original documents or parsing. Unchanged
    refresh checks also reuse persisted evidence without parsing.
@@ -300,10 +310,15 @@ Additionally verify:
     unchanged. Feed requests never carry the Canvas bearer token; foreign or
     unexpected feed URLs are rejected.
 13. DOCX, PPTX, XLSX, CSV, TXT/Markdown, RTF, HTML and standalone image inputs pass
-    through the same extractor/validator/persistence pipeline, preserve format-specific
+    through the same chunk/prefilter/Codex-review/validator pipeline, preserve format-specific
     locations, and do not reopen the source during final queries. Canvas Syllabus and
     published Pages are discovered and scanned as provisional HTML; approval remains
     mandatory before confirmed facts.
+14. A deadline without a legacy keyword is found through Codex semantic review;
+    statistical `test` text yields an audited negative review; one chunk can bind
+    multiple dates to distinct events without Python's former exactly-one-date rule.
+15. Final queries rebuild the exact candidate set from persisted strict reviews;
+    missing, extra or altered review/candidate rows withhold that document's facts.
 
 
 ## Grading-based midterm reference inference

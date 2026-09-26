@@ -3,7 +3,7 @@
 Applies to the entire project through root AGENTS.md. Read
 [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md), [ARCHITECTURE.md](ARCHITECTURE.md), and
 [../skills/canvas-ddl/SKILL.md](../skills/canvas-ddl/SKILL.md) before changing behavior.
-Contract v0.10 · 2026-09-25. If documents conflict, preserve product intent and
+Contract v0.11 · 2026-09-26. If documents conflict, preserve product intent and
 explicitly update every affected contract; never silently keep obsolete rules.
 
 ## Non-negotiable ownership
@@ -12,8 +12,9 @@ explicitly update every affected contract; never silently keep obsolete rules.
 - DeadlineService is the only gateway for CLI/Skill/future external adapters.
 - Engine owns time/course resolution, collection, normalization, classification,
   validation, reconciliation, deduplication, filtering, sort/count and freshness.
-- Document ingestion owns supported document parsing and candidate proposal generation.
-  Query adapters must not read source documents, independently extract dates or approve sources.
+- Document ingestion owns parsing/chunking and Python validation. Codex Skill owns
+  bounded semantic proposal generation only through engine-issued review requests.
+  It must not open source files directly, invent dates or approve sources.
 - Canvas structured records **and validated official documents** form evidence.
   A confirmed document-only item can be canonical; Canvas is default higher priority
   on conflicts only for the same logical item.
@@ -21,19 +22,21 @@ explicitly update every affected contract; never silently keep obsolete rules.
 ## Required pipelines
 
 ```text
-registered official course document → format-specific DocumentParser → DeadlineExtractor → DeadlineCandidate
-                       → DeadlineValidator → persisted ingestion artifacts
+registered official document → DocumentParser → StructuralChunker → LightSemanticPrefilter
+→ Codex semantic review
+                       → SemanticDeadlineCandidate → DeadlineValidator → persisted review/audit
 
 live Canvas + persisted confirmed documents → normalize → classify → validate
 → DeadlineReconciler → DeadlineDeduplicator → filter → sort → limit → count
 ```
 
 Always preserve `result.count == len(result.deadlines)`. Unresolved/rejected
-proposals and unresolved canonical conflicts never contribute to count. LLM
-extraction is a proposal interface, not a source of final facts. Do not move
-literal date verification, document trust, source priorities or merge decisions
-into prompts. Reconciler selects canonical values; Deduplicator prevents repeat
-counting. Domain code must not import adapters.
+proposals and unresolved canonical conflicts never contribute to count. Codex
+semantic extraction is a proposal interface: exact spans and selected literal dates
+must be rechecked by Python. Do not move document trust, approved period, source
+priorities, reconciliation or counting into prompts. Incomplete review withholds
+that document's facts. Reconciler selects canonical values; Deduplicator prevents
+repeat counting. Domain code must not import adapters.
 
 ## Official documents and provenance
 
@@ -99,6 +102,10 @@ auto/existing/refresh modes, expose file_library_check and keep every check scop
   document/calendar provenance, source-approval risk, confidence and precision.
 - Reconcile before range filters; changes outside the query window must not
   leave stale document dates countable. Never prefilter document candidates before matching.
+- One chunk may contain several dates/events; Codex binds one exact evidence/date
+  span per logical event and Python validates each independently. Statistical tests,
+  examples, learning content and negative/cancelled wording produce audited empty or
+  ambiguous reviews, never keyword-derived facts.
 - Ambiguous identities, multiple conflicting documents and tentative/negated wording
   must not produce a confidently selected canonical deadline.
 - Preserve all merged sources/conflicts and expose incomplete coverage. Never
@@ -113,7 +120,8 @@ auto/existing/refresh modes, expose file_library_check and keep every check scop
 ## Modules and repository
 
 `canvas/` owns GET auth/transport/pagination/retries; `collectors/` owns endpoints;
-`courses/` owns resolution; `documents/` owns approved registry, parser, extractor,
+`courses/` owns resolution; `documents/` owns approved registry, parser, chunker,
+strict semantic review protocol,
 ingestion artifact repository and orchestration; `deadlines/` owns models,
 normalizer, classifier, validator, reconciler, deduplicator and service;
 `cli/` and `skills/` are thin adapters. Avoid duplicate engine implementations.
@@ -143,7 +151,10 @@ the broader regression suite. Required cases:
 
 - Document-only deadline and explicit-date validation; document-only type filtering.
 - Canvas/document agreement, conflict/provenance, one logical count, moved date before filter.
-- Wrong title/location/text/date/course/hash and untrusted/LLM proposal rejection.
+- Wrong title/location/text/date/course/hash and untrusted/Codex proposal rejection.
+- No-keyword semantic deadline, audited statistical-test negative, multi-event/date
+  chunk, incomplete review withholding, fabricated span/date rejection and exact
+  review-to-candidate reconstruction after persistence.
 - Relative academic week with explicit/start/recess Canvas mappings, missing/conflicting
   anchors, tentative text, multiple dates/times and date-only precision.
 - Missing ingestion, changed/revoked version, stale artifacts and empty source units.
@@ -173,7 +184,8 @@ source/period approval remains absent and validation cannot confirm them. Never
 normalize provisional candidates into Deadline. Revalidate stored provisional flags.
 Search all cached source-unit text for query keywords/context; returned excerpts remain
 unvalidated data, with output caps/truncation visible. Skill never directly reads
-source documents or extracts final deadlines from excerpts. Relevant references must label source
+source files or converts search excerpts into facts. It may generate semantic proposals
+only from bounded `semantic-review-requests`; Python validates them. Relevant references must label source
 approval/date/layout uncertainty and never count as confirmed scheduled exams.
 Required tests include all supported modern formats, format-specific locations,
 unhinted/MIME/octet-stream files, >20 files, Canvas-positive exam refresh, unchanged
@@ -185,7 +197,7 @@ The PDF branch retains rotated text; zero-width layout failures may use the plai
 extractor. Low-text pages may use local PP-OCRv6 Small during ingestion only. Keep
 OCR lazy, batch size 1 and CPU-default; never run it during final evidence queries.
 Persist per-unit extraction_mode, OCR engine and aligned line confidence. OCR text remains
-input to DeadlineExtractor and independent DeadlineValidator, never a fact by itself.
+input to bounded Codex semantic review and independent DeadlineValidator, never a fact by itself.
 Only OCR evidence at or above the configured threshold may confirm; lower confidence
 is unresolved. Dependency/model/inference/empty-output failures must keep coverage
 partial. Native text bypasses OCR. This does not grant source authority or guarantee

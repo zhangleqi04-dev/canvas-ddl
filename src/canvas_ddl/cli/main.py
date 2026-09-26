@@ -51,6 +51,13 @@ def parser():
     commands.add_parser("documents")
     ingest = commands.add_parser("ingest")
     ingest.add_argument("--document", required=True)
+    review_requests = commands.add_parser("semantic-review-requests")
+    review_requests.add_argument("--document", required=True)
+    review_requests.add_argument("--offset", type=int, default=0)
+    review_requests.add_argument("--limit", type=int, default=20)
+    semantic_ingest = commands.add_parser("semantic-ingest")
+    semantic_ingest.add_argument("--document", required=True)
+    semantic_ingest.add_argument("--review-file", required=True)
     prepare = commands.add_parser("prepare-documents")
     prepare.add_argument("--course", action="append", required=True)
     prepare.add_argument("--limit", type=int, default=20)
@@ -94,6 +101,19 @@ def main(argv=None, *, factory=build_deadline_service, stdout=None):
             result = {"status": "ok", "documents": encode(service.list_documents())}
         elif args.command == "ingest":
             result = {"status": "ok", "ingestion": service.ingest_document(args.document)}
+        elif args.command == "semantic-review-requests":
+            result = {"status": "ok", "semantic_review": service.semantic_review_requests(
+                args.document, offset=args.offset, limit=args.limit)}
+        elif args.command == "semantic-ingest":
+            try:
+                with Path(args.review_file).open("rb") as stream:
+                    content = stream.read(1_000_001)
+                if len(content) > 1_000_000:
+                    raise ValueError
+                payload = content.decode("utf-8-sig")
+            except (OSError, UnicodeError, ValueError):
+                raise ApplicationError("INVALID_SEMANTIC_REVIEW", "Semantic review file must be bounded UTF-8 JSON.") from None
+            result = {"status": "ok", "semantic_ingestion": service.apply_semantic_review(args.document, payload)}
         elif args.command == "prepare-documents":
             result = service.prepare_documents(args.course, limit=args.limit)
         elif args.command == "approve-document":

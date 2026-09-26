@@ -67,6 +67,11 @@ class DeadlineCandidate:
     date_expression: str | None
     extractor: str = "rule-v1"
     location: str | None = None
+    deadline_type: str | None = None
+    value_kind: str | None = None
+    semantic_status: str | None = None
+    review_id: str | None = None
+    semantic_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,7 +79,7 @@ class CandidateValidation:
     status: str
     reasons: tuple[str, ...]
     validated_at: datetime
-    rule_version: str = "document-validator-v2"
+    rule_version: str = "document-validator-v3"
     value_at: datetime | None = None
     value_kind: str | None = None
     date_only: bool = False

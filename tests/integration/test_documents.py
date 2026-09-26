@@ -560,3 +560,135 @@ def test_wrong_canvas_course_url_and_nonhuman_approval_not_trusted(tmp_path):
         path.write_text(json.dumps(content))
         with pytest.raises(ApplicationError):
             ingestion.registry.list_documents()
+
+
+def semantic_payload(batch, reviews):
+    return {"schema_version": "codex-semantic-v1", "document_id": batch["document_id"],
+            "document_sha256": batch["document_sha256"], "reviews": reviews}
+
+
+def test_codex_semantic_review_finds_deadline_without_legacy_keyword(tmp_path):
+    ingestion, _ = setup_documents(tmp_path, ["Milestone submission: 2026-09-23 14:00"])
+    ingestion.require_semantic_review = True
+    ingestion.ingest("outline", COURSE)
+    batch = ingestion.semantic_review_requests("outline", COURSE)
+    request = batch["requests"][0]
+    review = {"request_id": request["request_id"], "reason_code": "submission_deadline", "events": [{
+        "title": "Milestone submission", "type": "assignment", "semantic_status": "scheduled",
+        "date_expression": "2026-09-23", "value_kind": "due_at",
+        "evidence_text": "Milestone submission: 2026-09-23 14:00",
+    }]}
+    result = ingestion.apply_semantic_review("outline", COURSE, semantic_payload(batch, [review]))
+    assert result["complete"] and result["confirmed"] == 1
+    data = query(service(ingestion), types=("assignment",))
+    assert data["count"] == 1 and data["deadlines"][0]["type"] == "assignment"
+    assert "CODEX_SEMANTIC_REVIEW" in data["deadlines"][0]["validation"]["checks"]
+
+
+def test_runtime_semantic_ingestion_does_not_call_legacy_extractor(tmp_path):
+    class ForbiddenExtractor:
+        def extract(self, *_args):
+            raise AssertionError("runtime semantic mode must not use legacy keyword extraction")
+
+    ingestion, _ = setup_documents(
+        tmp_path, ["Milestone submission: 2026-09-23"], extractor=ForbiddenExtractor(),
+    )
+    ingestion.require_semantic_review = True
+    report = ingestion.ingest("outline", COURSE)
+    assert report["legacy_rule_candidates"] == 0
+    assert report["semantic_review_total"] == 1
+
+
+def test_codex_semantic_review_binds_two_dates_in_one_chunk(tmp_path):
+    line = "Midterm Exam: 2026-09-23 14:00; Final Exam: 2026-11-30 09:00"
+    ingestion, _ = setup_documents(tmp_path, [line])
+    ingestion.require_semantic_review = True
+    ingestion.ingest("outline", COURSE)
+    batch = ingestion.semantic_review_requests("outline", COURSE)
+    request_id = batch["requests"][0]["request_id"]
+    events = [
+        {"title": "Midterm Exam", "type": "exam", "semantic_status": "scheduled",
+         "date_expression": "2026-09-23", "value_kind": "start_at",
+         "evidence_text": "Midterm Exam: 2026-09-23 14:00"},
+        {"title": "Final Exam", "type": "exam", "semantic_status": "scheduled",
+         "date_expression": "2026-11-30", "value_kind": "start_at",
+         "evidence_text": "Final Exam: 2026-11-30 09:00"},
+    ]
+    review = {"request_id": request_id, "reason_code": "scheduled_assessment", "events": events}
+    applied = ingestion.apply_semantic_review("outline", COURSE, semantic_payload(batch, [review]))
+    assert applied["complete"] and applied["confirmed"] == 2
+    data = query(service(ingestion), TimeIntent("date_range", "term", start_date="2026-09-01", end_date="2026-12-01"),
+                 types=("exam",))
+    assert data["count"] == 2
+    assert {item["title"] for item in data["deadlines"]} == {"Midterm Exam", "Final Exam"}
+
+
+def test_codex_semantic_negative_review_is_audited_without_deadline(tmp_path):
+    ingestion, _ = setup_documents(tmp_path, ["Use the t-test on the 2026-09-23 dataset"])
+    ingestion.require_semantic_review = True
+    ingestion.ingest("outline", COURSE)
+    batch = ingestion.semantic_review_requests("outline", COURSE)
+    request_id = batch["requests"][0]["request_id"]
+    review = {"request_id": request_id, "reason_code": "learning_content", "events": []}
+    applied = ingestion.apply_semantic_review("outline", COURSE, semantic_payload(batch, [review]))
+    assert applied["complete"] and applied["confirmed"] == 0
+    data = query(service(ingestion))
+    assert data["count"] == 0 and data["complete"]
+
+
+def test_codex_semantic_review_rejects_unanchored_date(tmp_path):
+    ingestion, _ = setup_documents(tmp_path, ["Midterm Exam: 2026-09-23"])
+    ingestion.require_semantic_review = True
+    ingestion.ingest("outline", COURSE)
+    batch = ingestion.semantic_review_requests("outline", COURSE)
+    request_id = batch["requests"][0]["request_id"]
+    review = {"request_id": request_id, "reason_code": "scheduled_assessment", "events": [{
+        "title": "Midterm Exam", "type": "exam", "semantic_status": "scheduled",
+        "date_expression": "2026-10-01", "value_kind": "start_at",
+        "evidence_text": "Midterm Exam: 2026-09-23",
+    }]}
+    with pytest.raises(ApplicationError) as error:
+        ingestion.apply_semantic_review("outline", COURSE, semantic_payload(batch, [review]))
+    assert error.value.code == "INVALID_SEMANTIC_REVIEW"
+
+
+def test_relative_week_evidence_cannot_bypass_codex_semantic_review(tmp_path):
+    ingestion, _ = setup_documents(tmp_path, ["Midterm Exam: Week 7 Friday"])
+    ingestion.require_semantic_review = True
+    ingestion.ingest("outline", COURSE)
+    assert ingestion.load_relative_week_evidence((COURSE,)) == ()
+
+    batch = ingestion.semantic_review_requests("outline", COURSE)
+    request_id = batch["requests"][0]["request_id"]
+    review = {"request_id": request_id, "reason_code": "scheduled_assessment", "events": [{
+        "title": "Midterm Exam", "type": "exam", "semantic_status": "scheduled",
+        "date_expression": "Week 7 Friday", "value_kind": "start_at",
+        "evidence_text": "Midterm Exam: Week 7 Friday",
+    }]}
+    applied = ingestion.apply_semantic_review("outline", COURSE, semantic_payload(batch, [review]))
+    assert applied["complete"] and applied["unresolved"] == 1
+    evidence = ingestion.load_relative_week_evidence((COURSE,))
+    assert len(evidence) == 1
+    assert evidence[0].candidate.extractor == "codex-semantic-v1"
+    assert evidence[0].validation.reasons == ("CANVAS_TEACHING_WEEK_REQUIRED",)
+
+
+def test_persisted_semantic_review_must_rebuild_exact_candidate_set(tmp_path):
+    ingestion, _ = setup_documents(tmp_path, ["Milestone submission: 2026-09-23"])
+    ingestion.require_semantic_review = True
+    ingestion.ingest("outline", COURSE)
+    batch = ingestion.semantic_review_requests("outline", COURSE)
+    request_id = batch["requests"][0]["request_id"]
+    review = {"request_id": request_id, "reason_code": "submission_deadline", "events": [{
+        "title": "Milestone submission", "type": "assignment", "semantic_status": "scheduled",
+        "date_expression": "2026-09-23", "value_kind": "due_at",
+        "evidence_text": "Milestone submission: 2026-09-23",
+    }]}
+    ingestion.apply_semantic_review("outline", COURSE, semantic_payload(batch, [review]))
+    with sqlite3.connect(ingestion.repository.path) as db:
+        db.execute("DELETE FROM candidates")
+    data = query(service(ingestion), types=("assignment",))
+    assert data["count"] == 0 and not data["complete"]
+    assert data["document_summary"][0]["candidate_issues"][0]["reasons"] == [
+        "INVALID_PERSISTED_SEMANTIC_REVIEW"
+    ]

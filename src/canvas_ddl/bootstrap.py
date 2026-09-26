@@ -20,7 +20,8 @@ def build_deadline_service(env_file=None):
                                                                  official_hosts=config.document_hosts),
                                          DocumentRepository(config.document_store), timezone=config.timezone,
                                          base_url=config.base_url, clock=clock,
-                                         parser=DocumentParser(ocr=ocr), ocr_min_confidence=config.ocr_min_confidence)
+                                         parser=DocumentParser(ocr=ocr), ocr_min_confidence=config.ocr_min_confidence,
+                                         require_semantic_review=True)
     preparation = DocumentPreparationService(client, ingestion.registry, allowed_hosts=config.document_hosts)
     service = DeadlineService(client, base_url=config.base_url, timezone_name=config.timezone,
                               allowed_ids=config.course_ids, exam_keywords=config.exam_keywords, document_ingestion=ingestion, clock=clock,
