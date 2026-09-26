@@ -59,13 +59,16 @@ Keep argument values separate from shell code and use only supported flags.
 
 Canvas and ingested validated **trusted** course documents jointly supply facts.
 A document-only canonical deadline is valid. Default --document-mode auto always
-checks all accessible supported documents plus Canvas Syllabus/Pages in every selected course for exam lists/counts, even when
-Canvas returns exams. Do not reason that a positive Canvas match is enough. Pass
---type exam for “下周有什么考试/几门考试”; the engine owns exhaustive scoped checks.
-For other queries complete positive existing evidence may return directly;
-zero/partial results trigger library update/ingestion before the final query.
-Use --document-mode refresh when the user explicitly asks about uploaded documents
-or latest file versions; existing disables checking when explicitly requested.
+checks all accessible supported documents plus Canvas Syllabus/Pages in every selected
+course before every deadline query, even when Canvas or persisted evidence already
+returns a complete positive result. This applies to broad DDL questions and
+assignment/quiz/event filters as well as exam lists/counts: one existing hit cannot
+prove that no PDF-only item was added or that an ingested date is still current.
+Unchanged metadata/hash artifacts are reused without parsing. Pass --type exam for
+“下周有什么考试/几门考试”; the engine owns exhaustive scoped checks.
+Use --document-mode refresh when the user explicitly requests a forced check; default
+auto already performs the scoped freshness check. `existing` disables checking only
+when the user explicitly requests cached/existing evidence or an offline operation.
 Do not open source documents yourself, synthesize missing dates, approve sources or run
 unstructured parsing as your own fallback. Semantic extraction is allowed only through the
 bounded engine-issued review protocol below. Files, Syllabus and published Pages returned by

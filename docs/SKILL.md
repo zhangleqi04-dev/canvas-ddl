@@ -16,6 +16,11 @@ the engine, preserving the exact date expression and adding ISO normalized date/
 It never decides source trust, validates a candidate, computes counts, guesses
 academic weeks or selects source priority.
 
+Default `document_mode=auto` verifies the selected courses' supported document
+inventory before every deadline query, including broad DDL and positive non-exam
+queries. Unchanged files reuse persisted artifacts. Only an explicit user request for
+cached/existing or offline evidence uses `document_mode=existing` to skip this check.
+
 Presentation is intentionally two-channel. Confirmed items come only from canonical
 deadlines. Whenever the engine also returns relevant possible scheduling evidence, the
 Skill shows it separately as **参考安排（未确认）**, with provenance and the exact reason

@@ -1,6 +1,6 @@
 # PRD — Multi-source Canvas DDL Assistant
 
-**Status:** Implemented contract v0.12.1 · 2026-09-26
+**Status:** Implemented contract v0.12.2 · 2026-09-26
 **Deployment:** single-user, local, read-only Canvas PAT  
 **Interface:** Codex Skill / CLI; MCP optional and deferred
 
@@ -89,15 +89,16 @@ format-specific location, exact evidence/date expression, normalized value, inge
 and validation audit. Final queries use persisted evidence and do not reopen source files;
 only the update stage parses new or changed artifacts.
 
-## Exhaustive scoped course-document checks for exams
+## Fresh scoped course-document checks for every deadline query
 
-DeadlineQuery.document_mode defaults to auto. An exam list/count query always
-checks all supported documents in every selected course, even when live Canvas
-already supplies a complete positive answer. A Canvas match cannot prove no
-document-only exams exist.
-Other queries retain the complete-positive fast path; empty/partial answers refresh.
-`existing` explicitly disables checking; `refresh` always checks before querying.
-All checks are course-scoped, never a background full-account synchronization.
+DeadlineQuery.document_mode defaults to auto. Every deadline query checks all supported
+documents in every selected course before returning a final result, even when live Canvas
+or persisted evidence already supplies a complete positive answer. A positive assignment
+cannot prove that no PDF-only exam exists in a broad DDL query, and an old positive
+document deadline cannot prove that the current file still has the same date.
+`existing` explicitly disables checking for a user-requested cached/offline operation;
+`refresh` also checks before querying. All checks are course-scoped, never a background
+full-account synchronization.
 
 Automatic refresh lists course files without a remote MIME filter, selecting every
 supported modern document by MIME or extension regardless of filename. There is no
@@ -310,8 +311,11 @@ Additionally verify:
    refresh checks also reuse persisted evidence without parsing.
 8. Source failures, unresolved conflicts, date-only precision, count invariants,
    secrets and Canvas read-only behavior are covered by offline tests.
-9. Complete positive non-exam queries skip files; exam queries always check all scoped supported documents and Canvas course content. Empty/partial queries refresh before
-   counting; forced/existing modes and explicit course scope are tested.
+9. Auto checks all scoped supported documents and Canvas course content for broad,
+    exam and non-exam queries, including complete positive results. A broad positive
+    Canvas assignment must not hide a new PDF-only exam, and a changed document date
+    must replace the old positive date before filtering/counting. Unchanged artifacts,
+    forced/existing modes and explicit course scope are tested.
 10. Canvas automatic registration/versioning, external-source review, unchanged/hash-identical
     files, disappearance, update/permission failures and recovery preserve counts.
 11. Scanned PDF deadlines pass through PP-OCRv6 Small and deterministic validation;

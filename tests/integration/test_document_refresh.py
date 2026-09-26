@@ -63,8 +63,11 @@ class Collector:
         return self.rows
 
 
-def setup(tmp_path, *, registered=True, auto=True, ingested=True, rows=(), error=None, document_id="outline"):
+def setup(tmp_path, *, registered=True, auto=True, ingested=True, rows=(), error=None,
+          document_id="outline", document_text=None):
     remote = Remote()
+    if document_text is not None:
+        remote.content = pdf(text=document_text)
     path = tmp_path / "outline.pdf"
     path.write_bytes(remote.content)
     row = {"document_id": document_id, "course_id": COURSE.course_id, "course_code": COURSE.course_code,
@@ -92,12 +95,36 @@ def query(service, mode="refresh"):
                                               types=("exam",), document_mode=mode)))
 
 
-def test_sufficient_existing_evidence_never_checks_library(tmp_path):
+def test_general_positive_query_still_checks_library_and_finds_pdf_only_exam(tmp_path):
     service, remote, _, _ = setup(tmp_path, registered=False, rows=[{"id": 1, "name": "Assignment 1", "due_at": "2026-09-23T06:00:00Z"}])
     result = encode(service.query(DeadlineQuery(time_intent=TimeIntent("calendar_week", "下周", offset=1),
-                                                types=("assignment",))))
-    assert result["count"] == 1 and result["file_library_check"]["state"] == "skipped"
-    assert remote.requests == [] and remote.downloads == 0
+                                                types=None)))
+    assert result["count"] == 2
+    assert {deadline["type"] for deadline in result["deadlines"]} == {"assignment", "exam"}
+    assert result["file_library_check"]["scope"] == "all_course_documents"
+    assert remote.requests == ["/api/v1/courses/12345/files"] and remote.downloads == 1
+
+
+def test_auto_positive_assignment_refreshes_changed_document_date(tmp_path):
+    service, remote, _, _ = setup(
+        tmp_path,
+        rows=[{"id": 1, "name": "Homework 3", "due_at": "2026-09-23T06:00:00Z"}],
+        document_text="Assignment 2 due: 2026-09-23 14:00",
+    )
+    remote.content = pdf(text="Assignment 2 due: 2026-09-24 14:00")
+    remote.version = "v2"
+
+    result = encode(service.query(DeadlineQuery(
+        time_intent=TimeIntent("calendar_week", "下周", offset=1),
+        types=("assignment",),
+        document_mode="auto",
+    )))
+
+    assignment = next(deadline for deadline in result["deadlines"] if deadline["title"] == "Assignment 2")
+    assert assignment["due_at"].startswith("2026-09-24T14:00:00")
+    assert all(not (deadline["title"] == "Assignment 2" and
+                    deadline["due_at"].startswith("2026-09-23")) for deadline in result["deadlines"])
+    assert result["file_library_check"]["actions"][0]["state"] == "updated"
 
 
 def test_exam_query_checks_pdfs_even_when_canvas_already_has_exam(tmp_path):

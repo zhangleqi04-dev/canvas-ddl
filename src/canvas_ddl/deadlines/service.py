@@ -206,18 +206,12 @@ class DeadlineService:
                                                 end=query.end, intent=query.time_intent)
         if query.document_mode == "existing" or self.document_refresher is None:
             return self._query_existing(query, time_range=time_range)
-        initial = None
-        # An exam list/count requires all course PDFs even when Canvas has a hit;
-        # one structured exam does not establish that there are no PDF-only exams.
-        exam_inventory_required = query.types is not None and "exam" in query.types
-        if query.document_mode != "refresh" and not exam_inventory_required:
-            try:
-                initial = self._query_existing(query, time_range=time_range)
-            except ApplicationError as error:
-                if error.code != "CANVAS_UNAVAILABLE":
-                    raise
-            if initial is not None and initial.complete and initial.matched_count > 0:
-                return replace(initial, file_library_check={"state": "skipped", "reason": "existing_evidence_sufficient"})
+        # Every automatic deadline query verifies the scoped course-document inventory
+        # before returning facts. A positive cached result cannot prove that no new
+        # PDF-only item exists or that a previously ingested date is still current.
+        # The refresher reuses unchanged metadata/hash artifacts, so this check does not
+        # imply re-downloading or re-parsing unchanged documents. Only explicit
+        # document_mode="existing" opts out of freshness verification.
         courses = self._resolve_courses(query)
         try:
             report = self.document_refresher.refresh(courses)

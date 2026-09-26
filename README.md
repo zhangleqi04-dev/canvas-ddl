@@ -7,9 +7,9 @@
 Python 引擎负责事实、验证、来源优先级、分类、去重与计数；Codex 只负责理解问题
 和展示结果。需要文档时先检查文件库并更新证据，再查询；不调用 LLM API，不修改 Canvas。
 
-默认考试查询会检查选中课程的全部可访问受支持文档以及 Canvas Syllabus/Pages，即使 Canvas 已有考试记录，
-也会检查文档中是否有其他安排。其他查询在已有完整结果时直接返回；空或不完整
-结果检查相关课程文件库。认证 Canvas API 返回的课程文件会按课程 ID、文件 ID 和内容哈希自动登记；
+默认所有 DDL 查询都会检查选中课程的全部可访问受支持文档以及 Canvas Syllabus/Pages，
+即使 Canvas 或本地证据已经返回完整正结果，也会先核对文件清单和版本。这样宽泛 DDL 查询
+不会漏掉 PDF-only 考试，已有文档日期也不会因 positive fast path 而跳过更新。认证 Canvas API 返回的课程文件会按课程 ID、文件 ID 和内容哈希自动登记；
 同一文件的后续版本自动更新并重新 ingestion，无需人工批准。外部链接和手工本地文件仍需维护者建立信任记录。
 相同版本复用本地证据，旧文件消失或已知变更无法纳入时，旧日期会被停用。
 
@@ -108,7 +108,7 @@ canvas-ddl prepare-documents --course COURSE101 --course COURSE102
 ```
 
 该命令通过 Canvas Files API 查找文件名带 syllabus、outline、handout 等提示的受支持文档，
-最多处理 20 份并自动登记。普通考试查询使用更完整的文件库刷新：检查全部可访问受支持
+最多处理 20 份并自动登记。自动 DDL 查询使用更完整的文件库刷新：检查全部可访问受支持
 文件，不按文件名筛选，也没有 20 份默认上限。Canvas 文件显示名可以没有扩展名，只要 API
 MIME 类型明确受支持。本地支持 PDF、DOCX、PPTX、XLSX、CSV、TXT/Markdown、RTF、HTML
 和 PNG/JPEG/WebP/TIFF/BMP；DOC/PPT/XLS、ZIP 和音视频转录暂不处理。Canvas token 只发给
@@ -191,7 +191,7 @@ python -m pytest -q
 
 默认测试为离线模拟数据与生成的 PDF，不需要真实 token。
 [PRD](docs/PRD_DDL_ONLY.md)、[Architecture](docs/ARCHITECTURE.md)、
-[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.12.1。
+[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.12.2。
 本地验证记录可能包含私有课程信息，因此不提交到公开仓库。
 
 PDF parser 依据 [pypdf 官方文档](https://pypdf.readthedocs.io/en/stable/user/extract-text.html)；

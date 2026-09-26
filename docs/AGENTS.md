@@ -3,7 +3,7 @@
 Applies to the entire project through root AGENTS.md. Read
 [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md), [ARCHITECTURE.md](ARCHITECTURE.md), and
 [../skills/canvas-ddl/SKILL.md](../skills/canvas-ddl/SKILL.md) before changing behavior.
-Contract v0.12.1 · 2026-09-26. If documents conflict, preserve product intent and
+Contract v0.12.2 · 2026-09-26. If documents conflict, preserve product intent and
 explicitly update every affected contract; never silently keep obsolete rules.
 
 ## Non-negotiable ownership
@@ -37,6 +37,13 @@ must be rechecked by Python. Do not move document trust, operator-approved perio
 priorities, reconciliation or counting into prompts. Incomplete review withholds
 that document's facts. Reconciler selects canonical values; Deduplicator prevents
 repeat counting. Domain code must not import adapters.
+
+In `document_mode=auto`, every deadline query must verify the selected courses'
+supported Canvas document inventory before final filtering/counting, including broad
+DDL and complete positive non-exam queries. Do not restore a positive-result skip: it
+can hide PDF-only types and serve an obsolete persisted date. Unchanged metadata/hash
+artifacts must be reused so freshness checks do not imply repeated parsing. Only explicit
+`existing` mode may skip the inventory check.
 
 ## Trusted documents and provenance
 
@@ -156,7 +163,8 @@ the broader regression suite. Required cases:
 - Ambiguous identity, distinct courses/assessments, conflicting document-only claims.
 - Canvas partial/timeout/401/403/404 and document ingestion freshness.
 - Existing time/course/classification/dedup/status/count/security regressions.
-- Fast-path skip, scoped fallback refresh, Canvas auto-registration, metadata/hash reuse, permission/review,
+- Positive broad/non-exam refresh, PDF-only discovery beside Canvas hits, changed-date
+  replacement, scoped fallback refresh, Canvas auto-registration, metadata/hash reuse, permission/review,
   deletion/known-change failures/limit handling and withheld evidence recovery.
 
 A task is done only when code and all affected docs/Skill schemas agree, tests

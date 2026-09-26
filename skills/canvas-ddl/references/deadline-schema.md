@@ -42,8 +42,8 @@ NON_CANONICAL_REFERENCE mean the item must be presented as unconfirmed. A
 provisional_canvas_document source retains SOURCE_APPROVAL_REQUIRED risk.
 
 file_library_check is null when no refresh orchestrator is used/existing mode;
-otherwise skipped (reason=existing_evidence_sufficient), checked (checked_at,
-course_ids, complete, actions, warnings) or failed. Actions include unchanged,
+otherwise it is checked (checked_at, course_ids, complete, actions, warnings) or
+failed. Auto and refresh both check the scoped inventory; actions include unchanged,
 updated/ingested, inaccessible, missing or failed. `pending_review` is reserved for
 external/manual provisional sources; Canvas API course resources bypass source approval. This field is
 library-check metadata, never an exam count or document extraction timestamp.
@@ -95,10 +95,10 @@ operator authority, course/content version, role and enums, then persists the so
 full review audit, candidates and validation results. Only confirmed candidates become
 Deadline.
 
-Default document_mode=auto first uses existing evidence, always checks every scoped
-supported document and Canvas Syllabus/Page for exam queries, allows complete positive
-non-exam results directly, and refreshes the scoped library for zero/partial results.
-refresh always checks first; existing never checks. Final queries revalidate persisted
+Default document_mode=auto checks every scoped supported document and Canvas
+Syllabus/Page before all deadline queries, including complete positive broad or
+non-exam results. This prevents both omitted PDF-only deadlines and stale positive
+document dates. refresh also checks; existing never checks. Final queries revalidate persisted
 evidence without reopening source files, and unchanged files are reused. New authenticated
 Canvas course-resource IDs register automatically; new external/manual source IDs remain
 pending. Changed, disappeared or failed current versions set refresh_blocked and withhold

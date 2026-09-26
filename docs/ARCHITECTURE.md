@@ -1,6 +1,6 @@
 # ARCHITECTURE — Multi-source Deadline Engine
 
-**Contract v0.12.1 · 2026-09-26**. Product: [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md).
+**Contract v0.12.2 · 2026-09-26**. Product: [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md).
 Rules: [AGENTS.md](AGENTS.md). Runtime Skill: [../skills/canvas-ddl/SKILL.md](../skills/canvas-ddl/SKILL.md).
 
 ## Document preparation interface
@@ -21,10 +21,10 @@ course/type/period and unchanged hash. Ordinary Canvas refresh never calls it.
 
 ## Query orchestration and file library refresh
 
-`DeadlineQuery.document_mode` = auto (default), existing or refresh. Auto uses the
-complete-positive fast path for non-exam queries; exam queries always refresh every scoped
-supported document. Zero/partial results also refresh. `refresh` checks first and `existing`
-never checks. Query/course/auth errors abort before fallback. The final query re-fetches live
+`DeadlineQuery.document_mode` = auto (default), existing or refresh. Auto and refresh
+verify every scoped supported document before all deadline queries, including complete
+positive broad and non-exam results. There is no positive-result freshness bypass.
+`existing` is the explicit cached/offline opt-out and never checks. Query/course/auth errors abort before fallback. The final query re-fetches live
 Canvas after update/ingestion, preserving reconcile-before-filter and count invariants.
 
 DocumentLibraryRefresher lists Canvas Files and Canvas Syllabus/Page HTML and tracks remote
@@ -61,7 +61,7 @@ DeadlineService.ingest_document(trusted document_id)
 Query path:
 Codex semantic intent / CLI → DeadlineService
   → validate TimeIntent / TimeRangeResolver once before network
-  → non-exam existing evidence sufficient? return; exams always DocumentLibraryRefresher
+  → unless explicitly existing: always run DocumentLibraryRefresher for scoped courses
   → CourseDocumentInventory + CanvasCourseContentInventory
   → all supported file MIME/extensions + Canvas Syllabus/Pages; Modules fallback marked partial
   → new/changed Canvas API resources: automatic registration + ingestion; external/manual: operator trust
@@ -280,7 +280,8 @@ relative weeks, ambiguity, wrong location/text/date/course/hash, LLM proposals,
 stored-confirmed bypass attempts, revoked/replaced versions, no final evidence-query source reads,
 date-only precision, conflicting documents, uncertain identity, partial freshness,
 counts/status filters/sorting, security and read-only Canvas transport.
-Also test sufficient-evidence skip, zero/partial auto refresh, forced/existing modes,
+Also test positive/zero/partial auto refresh, broad-query PDF-only discovery,
+changed positive document dates, forced/existing modes,
 scoped file checks, unchanged/identical hashes, source-identity update permission,
 pending sources, missing/update failures/limits and stale fact withholding/recovery.
 
