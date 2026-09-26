@@ -42,7 +42,7 @@ def _context_year(parsed, document):
     years = {int(value) for page in parsed.pages for value in re.findall(r"\b(?:19|20)\d{2}\b", page.text)}
     years.update(2000 + int(value) for page in parsed.pages
                  for value in re.findall(r"\b\d{1,2}[/-]\d{1,2}[/-](\d{2})\b", page.text))
-    if document.source_authority == "operator" and document.valid_from.year == document.valid_until.year:
+    if getattr(document, "source_authority", None) == "operator" and document.valid_from.year == document.valid_until.year:
         years.add(document.valid_from.year)
     return next(iter(years)) if len(years) == 1 else None
 
@@ -170,7 +170,8 @@ class DeadlineValidator:
         try:
             if not semantic:
                 day = parse_date(selected[0])
-            if document.source_authority == "operator" and not document.valid_from <= day <= document.valid_until:
+            authority = getattr(document, "source_authority", None)
+            if authority == "operator" and not document.valid_from <= day <= document.valid_until:
                 return verdict("rejected", "OUTSIDE_APPROVED_COURSE_PERIOD")
             if semantic:
                 time_options = grounded_source_times(text)
@@ -192,7 +193,7 @@ class DeadlineValidator:
             return verdict("rejected", "INVALID_LITERAL_DATE_OR_TIME")
         checks = ("CONTENT_HASH", "COURSE_SCOPE", "EXACT_PAGE_EVIDENCE", "EXPLICIT_DATE", "DEADLINE_ROLE")
         checks += (("CANVAS_API_AUTHENTICATED_SOURCE", "CANVAS_API_COURSE_SCOPE")
-                   if document.source_authority == "canvas_api"
+                   if getattr(document, "source_authority", None) == "canvas_api"
                    else ("OPERATOR_TRUSTED_SOURCE", "APPROVED_COURSE_PERIOD"))
         if semantic:
             checks += ("CODEX_SEMANTIC_REVIEW", "EXACT_EVIDENCE_SPAN", "EXACT_DATE_ANCHOR",

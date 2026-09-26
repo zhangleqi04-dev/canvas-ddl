@@ -12,7 +12,7 @@ from canvas_ddl.documents.registry import OfficialDocumentRegistry
 from canvas_ddl.documents.repository import DocumentRepository
 from canvas_ddl.documents.ingestion import DocumentIngestionService
 from canvas_ddl.documents.extractor import DeadlineExtractor
-from canvas_ddl.documents.models import DeadlineCandidate
+from canvas_ddl.documents.models import DeadlineCandidate, DocumentDraft
 from canvas_ddl.documents.ocr import OcrPageResult, OcrUnavailable
 from canvas_ddl.documents.parser import DocumentParser
 from canvas_ddl.documents.semantic import SCHEMA_VERSION
@@ -561,6 +561,19 @@ def test_wrong_canvas_course_url_and_nonhuman_approval_not_trusted(tmp_path):
         path.write_text(json.dumps(content))
         with pytest.raises(ApplicationError):
             ingestion.registry.list_documents()
+
+
+def test_provisional_document_validation_has_no_trusted_authority(tmp_path):
+    ingestion, _ = setup_documents(tmp_path, ["Midterm Exam: 2026-09-23"])
+    trusted = ingestion.registry.get("outline")
+    draft = DocumentDraft("draft", trusted.course_id, trusted.course_code, trusted.course_name,
+                          trusted.document_name, trusted.document_kind, trusted.source_url,
+                          trusted.path, trusted.sha256)
+    parsed = ingestion.parser.parse(draft, now=NOW)
+    candidate = ingestion.extractor.extract(parsed, draft)[0]
+    validation = ingestion.scanner.validate(candidate, parsed, draft, now=NOW)
+    assert validation.status == "unresolved"
+    assert validation.reasons[-2:] == ("SOURCE_APPROVAL_REQUIRED", "COURSE_PERIOD_APPROVAL_REQUIRED")
 
 
 def test_canvas_api_authority_requires_exact_authenticated_course_resource(tmp_path):
