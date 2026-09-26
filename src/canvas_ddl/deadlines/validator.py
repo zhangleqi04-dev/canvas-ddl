@@ -39,11 +39,19 @@ def _month_number(value):
 
 
 def _context_year(parsed, document):
+    if getattr(document, "source_authority", None) == "operator" and document.valid_from.year == document.valid_until.year:
+        return document.valid_from.year
+    # The first source unit is the bounded course-document header context. A
+    # unique year there is stronger than unrelated years in later references,
+    # examples or publication citations.
+    first = min(parsed.pages, key=lambda page: page.page, default=None)
+    header_years = ({int(value) for value in re.findall(r"\b(?:19|20)\d{2}\b", first.text[:2000])}
+                    if first else set())
+    if len(header_years) == 1:
+        return next(iter(header_years))
     years = {int(value) for page in parsed.pages for value in re.findall(r"\b(?:19|20)\d{2}\b", page.text)}
     years.update(2000 + int(value) for page in parsed.pages
                  for value in re.findall(r"\b\d{1,2}[/-]\d{1,2}[/-](\d{2})\b", page.text))
-    if getattr(document, "source_authority", None) == "operator" and document.valid_from.year == document.valid_until.year:
-        years.add(document.valid_from.year)
     return next(iter(years)) if len(years) == 1 else None
 
 

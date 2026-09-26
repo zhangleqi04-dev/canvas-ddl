@@ -782,6 +782,7 @@ def test_codex_normalized_ordinal_date_and_ampm_use_document_context(tmp_path):
     ingestion, _ = setup_documents(tmp_path, [
         "Course information 2026",
         "Final exam at 1:00pm on 24th November",
+        "Background reading published in 2025",
     ])
     ingestion.require_semantic_review = True
     ingestion.ingest("outline", COURSE)
