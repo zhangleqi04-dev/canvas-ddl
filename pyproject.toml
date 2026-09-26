@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canvas-ddl"
-version = "0.12.0"
+version = "0.12.1"
 description = "Deterministic multi-source Canvas and trusted course-document deadline engine"
 requires-python = ">=3.11"
 dependencies = [

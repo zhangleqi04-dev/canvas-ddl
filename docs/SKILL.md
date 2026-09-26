@@ -15,3 +15,9 @@ text chunks returned by DeadlineService and submit strict semantic candidate JSO
 the engine, preserving the exact date expression and adding ISO normalized date/time fields.
 It never decides source trust, validates a candidate, computes counts, guesses
 academic weeks or selects source priority.
+
+Presentation is intentionally two-channel. Confirmed items come only from canonical
+deadlines. Whenever the engine also returns relevant possible scheduling evidence, the
+Skill shows it separately as **参考安排（未确认）**, with provenance and the exact reason
+it remains uncertain, even when confirmed items already exist. These references never
+change the confirmed count or acquire an inferred date/window.

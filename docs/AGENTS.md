@@ -3,7 +3,7 @@
 Applies to the entire project through root AGENTS.md. Read
 [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md), [ARCHITECTURE.md](ARCHITECTURE.md), and
 [../skills/canvas-ddl/SKILL.md](../skills/canvas-ddl/SKILL.md) before changing behavior.
-Contract v0.12 · 2026-09-26. If documents conflict, preserve product intent and
+Contract v0.12.1 · 2026-09-26. If documents conflict, preserve product intent and
 explicitly update every affected contract; never silently keep obsolete rules.
 
 ## Non-negotiable ownership
@@ -101,6 +101,13 @@ network/permission state is partial; unchanged metadata/content must reuse artif
   Keep term context separate from candidate dates. Do not promote them, place a
   guessed date into a query window, count them or make rejected/tentative/conflicting
   proposals sound scheduled. This changes presentation only, not engine validation.
+- Always present relevant unconfirmed scheduling evidence in a separate
+  **参考安排（未确认）** section after confirmed results, whether the canonical count is
+  zero or positive. Inspect `reference_deadlines`, `unresolved_deadlines`, candidate
+  issues and `document_content_matches`; retain exact evidence, source/location and the
+  explicit blocking reason. Do not count it, infer unresolved range membership or turn
+  it into a fact. Exclude practice/examples, statistical tests, teaching content,
+  grading weight alone and negated/cancelled contexts.
 
 ## Modules and repository
 
@@ -174,6 +181,8 @@ unvalidated data, with output caps/truncation visible. Skill never directly read
 source files or converts search excerpts into facts. It may generate semantic proposals
 only from bounded `semantic-review-requests`; Python validates them. Relevant references must label external-source
 trust/date/layout uncertainty and never count as confirmed scheduled exams.
+Relevant unconfirmed references remain visible beside nonzero confirmed results; test
+that presentation invariant without changing engine count semantics.
 Required tests include all supported modern formats, format-specific locations,
 unhinted/MIME/octet-stream files, >20 files, Canvas-positive exam refresh, unchanged
 reuse, removed provisional content, Canvas Syllabus/Page discovery, forged confirmed

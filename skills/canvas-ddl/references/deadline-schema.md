@@ -27,6 +27,9 @@ candidate issues expose original evidence_text and validation rule/time.
 Trusted document summaries also expose semantic_review_required,
 semantic_review_schema, semantic_review_total/reviewed/pending. While pending is
 nonzero, that document's deadline candidates are withheld and the result is partial.
+These fields also feed the separate presentation-only unconfirmed-evidence channel.
+Relevant evidence is displayed after canonical deadlines whether canonical count is
+zero or positive; display does not change any engine count.
 
 reference_deadlines is a separate high-recall list for persisted Week N evidence
 bounded by full-term Canvas Calendar Events or official course ICS anchors.
@@ -144,6 +147,13 @@ scanned_at, unvalidated_excerpts=true, matches[{page,location,evidence_text,exce
 match_count and truncated. Every persisted source unit is searched; response limits expose
 omitted/truncated context. Match counts include unrelated keywords and are not exams.
 Neither excerpts nor unresolved proposals can bypass source/date validation.
+The Skill may semantically select relevant possible scheduling evidence for a separate
+**参考安排（未确认）** section, preserving exact text, source/location and the blocking
+reason. It must do this whenever relevant evidence exists, independent of canonical
+count. If no engine-resolved window exists, the Skill must say that inclusion in the
+requested time range is unconfirmed. Practice material, examples, statistical tests,
+learning content, weighting alone and negated/cancelled items are not presented as
+possible scheduled deadlines.
 
 Parser v3 retains rotated text; zero-width layout failures may use the plain text
 extractor. Low-text pages may use local PP-OCRv6 Small during ingestion. Persist

@@ -1,6 +1,6 @@
 # ARCHITECTURE — Multi-source Deadline Engine
 
-**Contract v0.12 · 2026-09-26**. Product: [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md).
+**Contract v0.12.1 · 2026-09-26**. Product: [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md).
 Rules: [AGENTS.md](AGENTS.md). Runtime Skill: [../skills/canvas-ddl/SKILL.md](../skills/canvas-ddl/SKILL.md).
 
 ## Document preparation interface
@@ -73,7 +73,8 @@ Codex semantic intent / CLI → DeadlineService
   → DeadlineReconciler → DeadlineDeduplicator → filter → sort → limit → count
   → cached-page literal keyword/context search (no fact conversion)
   → range/type-filtered ReferenceDeadline watchlist (separate from canonical count)
-  → DeadlineQueryResult + reference_deadlines + document_content_matches → JSON → Codex
+  → DeadlineQueryResult + unconfirmed evidence channels → JSON → Codex
+  → confirmed results + separate relevant unconfirmed references
 ```
 
 ## Components
@@ -248,6 +249,16 @@ deadlines, generated_at, warnings, coverage, document_summary, unresolved_deadli
 file_library_check, document_content_matches and evidence_scope. Count equals returned canonical list length. Before-limit
 counts are engine-provided, not LLM arithmetic.
 
+Presentation projects this response into two independent views. The confirmed view uses
+only canonical `deadlines`. The unconfirmed view considers `reference_deadlines`,
+`unresolved_deadlines`, candidate issues and `document_content_matches`, and is emitted
+whenever semantically relevant possible scheduling evidence exists, including when the
+confirmed view is non-empty. Codex may remove obvious non-scheduling keyword contexts,
+but it cannot promote an excerpt, resolve its date/source, or change counts. Every shown
+reference retains exact evidence, provenance/location and its unresolved reason. Without
+an engine-resolved reference window, the presentation states that time-range membership
+is unknown.
+
 `live`/`live_partial`: no ingested document inventory in result. With document
 inventory use `live_with_ingested_documents`/`mixed_partial`. Document timestamps
 retain ingestion/validation semantics, never imply live document rereading. Partial
@@ -275,6 +286,9 @@ pending sources, missing/update failures/limits and stale fact withholding/recov
 
 Existing time/course/Canvas regression tests remain mandatory. No tests prove
 natural-language skill selection by merely matching instruction wording.
+Presentation acceptance fixtures must cover relevant unconfirmed evidence beside both
+zero and positive canonical results, unchanged counts/provenance, unresolved time-window
+wording, and exclusion of practice/example/statistical/negated contexts.
 
 ## All-document inventory and provisional content contracts (v0.9; extends v0.5)
 
@@ -304,6 +318,8 @@ exam count. Context can contain split-line exam/date evidence or unrelated uses 
 “test”; neither is a validated Deadline. Output includes course, name/hash, page,
 source URL, source_verified, scanned_at and unvalidated_excerpts. Skill may present
 relevant text as an unconfirmed reference with risks, never choose source trust.
+This separate presentation is required whenever relevant possible scheduling evidence
+exists; a nonzero canonical count must not suppress it.
 Each match additionally exposes `location`; page remains a compatible numeric unit index.
 
 DocumentParser supports AES course PDFs readable with an empty user password.

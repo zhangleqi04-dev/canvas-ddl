@@ -171,6 +171,9 @@ partial。最终查询只读持久化证据，不在每次查询时重新打开 
   的引擎计数，所有 unresolved 候选不参与计算。
 - reference_count/reference_deadlines 是 Canvas 日历解析出的高召回参考安排，必须
   标明未确认、日期精度、置信度和来源，不并入确认数量。
+- 只要存在与问题相关但尚未确认的安排，无论已确认结果是 0 条还是多条，Skill 都会在
+  **参考安排（未确认）** 中单独显示原文、课程、来源位置和未确认原因。没有经引擎解析的
+  时间范围时，会明确说明无法判断它是否落在查询区间；这类证据不改变确认数量。
 - ok/complete=true 仅覆盖实时支持来源和**登记的文档 inventory**，不是所有课程文件。
   未登记文档会有 scope warning；partial 零条不能说明没有考试。
 - freshness 区分 live 与已 ingestion 文档，文档 validation/ingestion time 不是实时
@@ -188,7 +191,7 @@ python -m pytest -q
 
 默认测试为离线模拟数据与生成的 PDF，不需要真实 token。
 [PRD](docs/PRD_DDL_ONLY.md)、[Architecture](docs/ARCHITECTURE.md)、
-[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.12。
+[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.12.1。
 本地验证记录可能包含私有课程信息，因此不提交到公开仓库。
 
 PDF parser 依据 [pypdf 官方文档](https://pypdf.readthedocs.io/en/stable/user/extract-text.html)；
@@ -217,4 +220,6 @@ OCR 依据 [PaddleOCR 官方安装说明](https://www.paddleocr.ai/main/en/versi
 覆盖跨行安排。每份文档最多返回10段、每段1500字符并显示截断信息；关键词匹配
 不是考试数量，统计学的 test、举例中的 exam 也不是考试安排。Skill 只呈现相关
 引擎证据及风险，不自行读取源文档、决定来源或将原文变成最终日期事实。
+相关的未确认证据不会因为已有 confirmed 考试而被隐藏；练习卷、示例、统计检验、
+教学内容、仅有评分权重及取消/否定语境仍不会作为可能的考试安排展示。
 PDF 解析支持能以空用户密码正常打开的 AES 文件；需要实际密码的文件仍安全失败。

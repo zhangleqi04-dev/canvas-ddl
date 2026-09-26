@@ -132,14 +132,33 @@ unlock_at/lock_at remain availability fields.
 - ambiguous/unresolved_conflict diagnostics: explain review is needed; these
   unresolved_deadlines are not canonical or included in count.
 
-This user's presentation preference: when a validated trusted document has clear
-month/day evidence but remains unresolved (for example, no explicit year), show the
-engine-returned candidate text as **参考安排（未确认）** with document/location and the
-specific uncertainty, rather than replying only that no confirmed record exists.
-State any known term context separately; do not synthesize a canonical timestamp,
-claim a guessed date falls in the query window or include references in exam counts.
-Rejected, tentative/cancelled or conflicting proposals must not be presented as
-likely scheduled events. Inspect `reference_deadlines` after canonical deadlines.
+Always use a two-channel presentation when relevant unconfirmed evidence exists,
+regardless of whether the canonical count is zero or positive. Present canonical
+`deadlines` first as **已确认**, then present relevant engine-returned evidence as
+**参考安排（未确认）**. Inspect, in order, `reference_deadlines`,
+`unresolved_deadlines`, relevant `document_summary.candidate_issues`, and relevant
+`document_content_matches`. Include the course, possible item, exact returned evidence,
+document/source and location, plus the specific reason it is not confirmed (for example
+relative week only, exact date/year missing, semantic review incomplete, OCR uncertainty,
+pending source authority, identity ambiguity or source conflict). If an item establishes
+only that an assessment may exist but not when it occurs, say exactly that and state that
+its relationship to the requested time window is unconfirmed.
+
+This is a presentation-only high-recall channel. Never add these items to `count`,
+`matched_count` or `course_counts`, and never describe a keyword match as a confirmed
+deadline. When references are shown, phrase the result as “已确认 N 项；另有未确认参考”
+rather than presenting N as the possible overall total. Do not invent a reference total
+from `match_count`; use `reference_count` only for `reference_deadlines` and otherwise
+describe the displayed evidence without an aggregate count.
+
+Clear month/day evidence that remains unresolved (for example, no explicit year) may
+therefore appear with its document/location and specific uncertainty. State any known
+term context separately; do not synthesize a canonical timestamp, claim a guessed date
+falls in the query window or include references in exam counts. Rejected,
+tentative/cancelled or conflicting proposals must not be presented as likely scheduled
+events. Statistical tests, practice papers, illustrative exam examples, lecture content,
+assessment weight alone and negated/cancelled items are not scheduled exam references.
+Inspect `reference_deadlines` after canonical deadlines.
 A ReferenceDeadline means the engine bounded persisted `Week N` evidence using
 the course's full-term Canvas Calendar Events or official course ICS fallback.
 Present it as **参考安排（未确认）**, including
@@ -189,7 +208,8 @@ yourself or inherit it by file names.
 - ok/complete=true: use count directly. A verified zero means no matching
   canonical items in the returned **live Canvas plus trusted ingested document
   evidence scope**, not proof that every course document was discovered.
-- partial/complete=false: show confirmed canonical items when useful, describe
+- partial/complete=false: show confirmed canonical items when useful, then show all
+  relevant unconfirmed evidence under the separate reference heading; describe
   warnings/coverage/document_summary and say overall totals remain unconfirmed.
   Partial zero does not establish absence. Never present count as a full-account total.
 - needs_input/AMBIGUOUS_COURSE: show candidates and ask which course.
@@ -242,8 +262,9 @@ location/source and clear risks. Do not turn these search excerpts into canonica
 only the separate semantic-review protocol may propose grounded candidates for Python
 validation. Never claim an untrusted external/manual source is official or count matches.
 match_count/truncated/excerpt_truncated describe excerpt coverage, never exam totals.
-If canonical count is zero but relevant reference evidence exists, present that
-reference and explain why the overall exam total/absence remains unconfirmed.
+Whenever relevant unconfirmed evidence exists, present it even when canonical count is
+positive. Explain why each item is unconfirmed and why it does not alter the confirmed
+count or establish an overall absence/total.
 
 Scanning and OCR are engine-owned ingestion details. PP-OCRv6 Small may run locally
 only for low-text PDF pages, standalone images and eligible PPTX images while new/changed files are ingested. Codex must not call

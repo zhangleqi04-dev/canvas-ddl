@@ -1,6 +1,6 @@
 # PRD — Multi-source Canvas DDL Assistant
 
-**Status:** Implemented contract v0.12 · 2026-09-26
+**Status:** Implemented contract v0.12.1 · 2026-09-26
 **Deployment:** single-user, local, read-only Canvas PAT  
 **Interface:** Codex Skill / CLI; MCP optional and deferred
 
@@ -122,6 +122,9 @@ This is literal evidence search, not general RAG or independent Skill document r
 Excerpts are unvalidated; statistical tests/examples are not scheduled examinations.
 Adapters may quote relevant reference text with its source/page and explicit risk,
 without asserting source officiality, inferring dates or computing exam counts.
+Relevant unconfirmed evidence must be presented in a separate section whether the
+canonical result contains zero or many confirmed items. This prevents a confirmed hit
+from hiding other plausible course arrangements that remain under review.
 
 Unchanged metadata/hash with valid artifacts reuses stored content without parsing.
 Changed/missing metadata triggers a hash comparison. An authenticated Canvas resource
@@ -252,6 +255,20 @@ Count follows reconciliation, deduplication, filtering and limit. `matched_count
 and `course_counts` are computed before limit. Counts refer to logical items,
 not unique courses. Unvalidated/unresolved candidates are never countable.
 
+The Codex presentation has two result channels:
+
+1. **已确认** uses only `deadlines` and the engine-provided canonical counts.
+2. **参考安排（未确认）** uses relevant `reference_deadlines`,
+   `unresolved_deadlines`, candidate issues and cached document content matches.
+
+The second channel is mandatory whenever relevant possible scheduling evidence exists,
+even if the first channel is non-empty. Each reference keeps its exact evidence,
+course, source/document, location and explicit blocking reason. A reference without an
+engine-resolved window must say that its inclusion in the requested time period is
+unknown. Keyword frequency is never a reference total. Practice exams, examples,
+statistical tests, teaching content, grading weight alone and cancelled/negated items
+do not qualify as possible scheduled deadlines.
+
 JSON includes status, complete, query, deadlines, count, warnings, coverage,
 document_summary, unresolved_deadlines and evidence_scope. `ok` is complete only
 within successfully fetched Canvas sources and the explicitly registered document
@@ -317,6 +334,10 @@ Additionally verify:
     missing, extra or altered review/candidate rows withhold that document's facts.
 16. `02/10/26`, ordinal month dates and AM/PM normalize through Codex v2 and are
     independently grounded by Python; impossible/fabricated mappings remain non-canonical.
+17. Presentation scenarios cover zero and positive canonical counts with relevant
+    unconfirmed evidence. Both must display the separate reference section, preserve
+    source/location/reason, leave canonical counts unchanged, avoid assigning unresolved
+    evidence to a time window, and suppress practice/example/statistical/negated matches.
 
 
 ## Grading-based midterm reference inference
