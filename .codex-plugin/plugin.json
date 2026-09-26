@@ -1,7 +1,7 @@
 {
   "name": "canvas-ddl",
-  "version": "0.11.0",
-  "description": "Query Canvas and validated official course documents for deadlines with source-aware reconciliation.",
+  "version": "0.12.0",
+  "description": "Query Canvas and validated trusted course documents for deadlines with source-aware reconciliation.",
   "author": {
     "name": "Canvas DDL Contributors",
     "url": "https://github.com/zhangleqi04-dev"
@@ -19,7 +19,7 @@
   "interface": {
     "displayName": "Canvas DDL",
     "shortDescription": "Query verified Canvas and course-document deadlines",
-    "longDescription": "Combines live Canvas records with pre-ingested, validated official course documents, reconciles conflicts, and returns deadline counts with provenance and completeness status.",
+    "longDescription": "Combines live Canvas records with pre-ingested, validated trusted course documents, reconciles conflicts, and returns deadline counts with provenance and completeness status.",
     "developerName": "Canvas DDL Contributors",
     "category": "Productivity",
     "capabilities": [

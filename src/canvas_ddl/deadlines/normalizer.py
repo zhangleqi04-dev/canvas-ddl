@@ -139,7 +139,8 @@ class DeadlineNormalizer:
         reference = SourceReference("official_document", None, url, validation.validated_at,
                                     document.document_id, document.document_name, candidate.page, candidate.evidence_text,
                                     document.sha256, parsed.parsed_at, info, value, validation.value_kind, validation.date_only,
-                                    page.extraction_mode, page.ocr_engine, confidence, candidate.location)
+                                    page.extraction_mode, page.ocr_engine, confidence, candidate.location,
+                                    document.source_authority)
         fallback = candidate.deadline_type or ("event" if validation.value_kind == "start_at" else "assignment")
         if candidate.deadline_type is None and re.search(r"\bquiz\b|小测|测验", candidate.title, re.I):
             fallback = "quiz"

@@ -6,7 +6,7 @@ exit 0 for ok/partial, exit 2 for errors. Credentials/raw Canvas bodies are abse
 ## Query results
 
 status: ok/partial/needs_input/error. complete means requested Canvas sources and
-registered official document artifacts are checked; it does not mean all course documents
+trusted registered document artifacts are checked; it does not mean all course documents
 in the course were discovered. evidence_scope explains the supported inventory.
 Any provisional reference evidence is explicitly labeled and never counted.
 
@@ -21,9 +21,10 @@ error code and verification time. document_summary gives registered document ID,
 name, course, ingestion state/time, confirmed/unresolved/rejected candidate counts
 and candidate issues. unresolved_deadlines holds unresolved identity/source
 conflicts, with evidence, but never contributes to count.
-document_summary additionally exposes source_url and valid_from/valid_until;
+document_summary additionally exposes source_url, `source_authority` (`canvas_api` or
+`operator`) and operator valid_from/valid_until (null for `canvas_api`);
 candidate issues expose original evidence_text and validation rule/time.
-Approved document summaries also expose semantic_review_required,
+Trusted document summaries also expose semantic_review_required,
 semantic_review_schema, semantic_review_total/reviewed/pending. While pending is
 nonzero, that document's deadline candidates are withheld and the result is partial.
 
@@ -40,7 +41,8 @@ provisional_canvas_document source retains SOURCE_APPROVAL_REQUIRED risk.
 file_library_check is null when no refresh orchestrator is used/existing mode;
 otherwise skipped (reason=existing_evidence_sufficient), checked (checked_at,
 course_ids, complete, actions, warnings) or failed. Actions include unchanged,
-updated/ingested, pending_review, inaccessible, missing or failed. This field is
+updated/ingested, inaccessible, missing or failed. `pending_review` is reserved for
+external/manual provisional sources; Canvas API course resources bypass source approval. This field is
 library-check metadata, never an exam count or document extraction timestamp.
 
 Freshness: live/live_partial, live_with_ingested_documents/mixed_partial. Details
@@ -58,7 +60,7 @@ reconciliation_status, canonical_reason, conflicts and multiple sources.
 Document sources preserve document_id/name, page-compatible unit index, location,
 evidence_text, document_sha256,
 ingested_at, validation, value_at/value_kind/date_only, extraction_mode, ocr_engine,
-ocr_confidence and original source URL.
+ocr_confidence, source_authority and original source URL.
 Canvas sources retain resource identity and verified structured value.
 
 Conflict fields: field, canonical_value, alternative_value, alternative_source
@@ -73,30 +75,41 @@ Do not infer missing from time or submitted from offline grading alone.
 
 ## Ingestion and authority
 
-Operator-approved official course-document registry is separate from extraction.
+The trusted course-document registry is separate from extraction. Authenticated,
+course-scoped Canvas Files/Syllabus/Pages are registered with `source_authority=canvas_api`
+after exact Canvas origin, course path, resource ID and content hash checks; no human
+source approval or teaching-period entry is required. External/manual sources use
+`source_authority=operator` and retain explicit human approval plus course-period checks.
+
 Ingestion parses and structurally chunks once. Codex reviews bounded untrusted chunks
-with the strict `codex-semantic-v1` schema, using exact title/evidence/date substrings
-and one event per logical date. Python validates literal source-location evidence,
-selected explicit date, course/content version/role/enums, then persists parsed text,
-the full review audit, candidates and validation results.
-Only confirmed candidates become Deadline. Default document_mode=auto first uses
-existing evidence, always checks all scoped supported documents and Canvas Syllabus/Pages for exam queries, allows complete
-positive non-exam results directly, and checks the
-scoped library for zero/partial results. refresh always checks first; existing
-never checks. Authorized same-file versions may be re-ingested in the update stage;
-final queries revalidate persisted evidence without source-document parsing. Unchanged files
-are reused. New source IDs remain pending. Changed unauthorized/disappeared/known
-failed new versions set refresh_blocked and withhold old facts. Week expressions and
-low-confidence OCR remain unresolved at ingestion. Missing Codex reviews withhold
-the document rather than falling back to keyword facts. A deterministic query-time
-TeachingWeekResolver can bound one Week N expression from Canvas Calendar Events or
-the engine's safe official course ICS fallback as a ReferenceDeadline only; it never
-promotes it into canonical count. Empty scanned pages,
-missing ingestion, changed versions and unresolved/rejected coverage make the
-query partial. No unreviewed filename/URL/LLM confidence grants source authority.
-Final queries also parse the stored strict reviews again and require them to rebuild
-the exact stored candidate set. Any missing, extra or altered review/candidate row
-withholds that document and reports invalid persisted semantic review.
+with strict `codex-semantic-v2` JSON. Every event keeps an exact title, evidence span and
+`date_expression`, plus separate `normalized_date` (`YYYY-MM-DD` or null) and
+`normalized_time` (`HH:MM` or null). Codex may interpret numeric dates, ordinal dates and
+AM/PM; Python independently verifies that the normalized value is a literal-compatible
+reading of the source expression. A missing year is accepted only when full-document
+context supplies one unambiguous year. Python also validates source location, Canvas or
+operator authority, course/content version, role and enums, then persists the source text,
+full review audit, candidates and validation results. Only confirmed candidates become
+Deadline.
+
+Default document_mode=auto first uses existing evidence, always checks every scoped
+supported document and Canvas Syllabus/Page for exam queries, allows complete positive
+non-exam results directly, and refreshes the scoped library for zero/partial results.
+refresh always checks first; existing never checks. Final queries revalidate persisted
+evidence without reopening source files, and unchanged files are reused. New authenticated
+Canvas course-resource IDs register automatically; new external/manual source IDs remain
+pending. Changed, disappeared or failed current versions set refresh_blocked and withhold
+old facts. Week expressions and low-confidence OCR remain unresolved. Missing Codex reviews
+withhold the document instead of falling back to keyword facts. TeachingWeekResolver may
+bound one Week N expression from Canvas Calendar Events or the safe official course ICS
+fallback as a ReferenceDeadline only; it never enters canonical count. Empty scanned pages,
+missing ingestion and unresolved/rejected coverage keep the query partial.
+
+No filename, arbitrary URL or LLM confidence grants source authority. Canvas authority comes
+only from the authenticated course API and exact scoped identity. Final queries parse stored
+strict reviews again and require them to rebuild the exact stored candidate set. A missing,
+extra or altered review/candidate row withholds that document and reports invalid persisted
+semantic review.
 
 ## Errors
 
@@ -118,8 +131,9 @@ state/pages/candidate_count/confirmed/scanned_at/ocr_pages/empty_pages. Attempte
 counts are not successful document parse counts; inspect action failures/scan states.
 Default refresh has no file-count cap. existing explicitly skips inventory checks.
 
-Unapproved supported documents and Canvas Syllabus/Page HTML are parsed into an isolated provisional database, never the approved
-fact store. document_summary.source_verified=false and candidate issues retain
+Untrusted external/manual supported documents are parsed into an isolated provisional
+database, never the trusted fact store. Authenticated Canvas Syllabus/Page HTML uses the
+automatic `canvas_api` path instead. `document_summary.source_verified=false` and candidate issues retain
 original text/location/validation checks/reasons. SOURCE_APPROVAL_REQUIRED and
 COURSE_PERIOD_APPROVAL_REQUIRED ensure no provisional proposal is confirmed.
 proposed_value_at, if present, is a literal syntax proposal, never canonical timing.

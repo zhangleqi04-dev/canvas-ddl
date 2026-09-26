@@ -45,12 +45,12 @@ class DocumentScanService:
 
     def load(self, courses, rows):
         course_map = {c.course_id: c for c in courses}
-        approved = {d.document_id: d for d in self.ingestion.registry.list_documents(tuple(course_map))}
+        trusted = {d.document_id: d for d in self.ingestion.registry.list_documents(tuple(course_map))}
         summaries, warnings = [], []
         for row in rows:
             if str(row.get("course_id")) not in course_map:
                 continue
-            doc = approved.get(row.get("document_id"))
+            doc = trusted.get(row.get("document_id"))
             if doc and doc.sha256 == row.get("sha256") and not doc.refresh_blocked:
                 continue
             draft = self.draft(row)

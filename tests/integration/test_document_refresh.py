@@ -12,6 +12,7 @@ from canvas_ddl.documents.repository import DocumentRepository
 from canvas_ddl.documents.ingestion import DocumentIngestionService
 from canvas_ddl.documents.preparation import DocumentPreparationService
 from canvas_ddl.documents.refresh import DocumentLibraryRefresher
+from canvas_ddl.documents.semantic import SCHEMA_VERSION
 from canvas_ddl.deadlines.service import DeadlineService
 from canvas_ddl.deadlines.query import DeadlineQuery
 from canvas_ddl.deadlines.time_intent import TimeIntent
@@ -62,11 +63,11 @@ class Collector:
         return self.rows
 
 
-def setup(tmp_path, *, registered=True, auto=True, ingested=True, rows=(), error=None):
+def setup(tmp_path, *, registered=True, auto=True, ingested=True, rows=(), error=None, document_id="outline"):
     remote = Remote()
     path = tmp_path / "outline.pdf"
     path.write_bytes(remote.content)
-    row = {"document_id": "outline", "course_id": COURSE.course_id, "course_code": COURSE.course_code,
+    row = {"document_id": document_id, "course_id": COURSE.course_id, "course_code": COURSE.course_code,
         "course_name": COURSE.course_name, "document_name": "Course Outline.pdf", "document_kind": "course_outline",
         "source_url": remote.base_url + "/courses/12345/files/99", "path": path.name,
         "sha256": hashlib.sha256(remote.content).hexdigest(), "approved_by": "fixture-human",
@@ -77,7 +78,7 @@ def setup(tmp_path, *, registered=True, auto=True, ingested=True, rows=(), error
     ingestion = DocumentIngestionService(registry, DocumentRepository(tmp_path / "docs.sqlite3"),
         timezone="Asia/Singapore", base_url=remote.base_url, clock=lambda: NOW)
     if registered and ingested:
-        ingestion.ingest("outline", COURSE)
+        ingestion.ingest(document_id, COURSE)
     prepare = DocumentPreparationService(remote, registry)
     refresh = DocumentLibraryRefresher(prepare, ingestion, clock=lambda: NOW)
     service = DeadlineService(remote, base_url=remote.base_url, document_ingestion=ingestion,
@@ -103,17 +104,62 @@ def test_exam_query_checks_pdfs_even_when_canvas_already_has_exam(tmp_path):
     service, remote, _, _ = setup(tmp_path, registered=False, rows=[{"id": 1, "name": "Midterm Exam", "due_at": "2026-09-23T06:00:00Z"}])
     result = query(service, "auto")
     assert result["count"] == 1 and result["file_library_check"]["scope"] == "all_course_documents"
-    assert remote.downloads == 1 and result["document_summary"][0]["source_verified"] is False
+    assert remote.downloads == 1 and result["document_summary"][0]["source_verified"] is True
+    assert registry_authority(result, service) == "canvas_api"
 
 
-def test_zero_triggers_discovery_but_never_auto_approves_new_document(tmp_path):
+def registry_authority(_result, service):
+    return service.document_ingestion.registry.list_documents()[0].source_authority
+
+
+def test_zero_triggers_authenticated_canvas_registration_and_ingestion(tmp_path):
     service, remote, registry, _ = setup(tmp_path, registered=False)
     result = query(service, "auto")
-    assert result["count"] == 0 and not result["complete"]
-    assert result["file_library_check"]["actions"][0]["state"] == "pending_review"
-    assert remote.downloads == 1 and registry.list_documents() == ()
+    assert result["count"] == 1 and result["complete"]
+    assert result["file_library_check"]["actions"][0]["state"] == "ingested"
+    assert remote.downloads == 1 and registry.list_documents()[0].source_authority == "canvas_api"
     query(service, "auto")
     assert remote.downloads == 1  # Metadata-unchanged pending PDF is not redownloaded.
+
+
+def test_canvas_api_document_needs_no_source_approval_but_semantics_are_withheld(tmp_path):
+    service, remote, registry, _ = setup(tmp_path, registered=False)
+    service.document_ingestion.require_semantic_review = True
+    remote.content = pdf(text="Nonlinear Programming Midterm Exam: 02/10/26")
+
+    initial = encode(service.query(DeadlineQuery(
+        time_intent=TimeIntent("date_range", "2 October", start_date="2026-10-02", end_date="2026-10-02"),
+        types=("exam",), document_mode="auto",
+    )))
+    assert initial["count"] == 0 and not initial["complete"]
+    assert initial["document_summary"][0]["source_authority"] == "canvas_api"
+    assert initial["document_summary"][0]["valid_from"] is None
+    assert initial["document_summary"][0]["valid_until"] is None
+    assert initial["document_summary"][0]["state"] == "semantic_review_required"
+    document = registry.list_documents()[0]
+    assert document.approved_by == "" and document.source_authority == "canvas_api"
+
+    batch = service.semantic_review_requests(document.document_id)
+    request = batch["requests"][0]
+    payload = {"schema_version": SCHEMA_VERSION, "document_id": document.document_id,
+               "document_sha256": batch["document_sha256"], "reviews": [{
+        "request_id": request["request_id"], "reason_code": "scheduled_assessment", "events": [{
+            "title": "Nonlinear Programming Midterm Exam", "type": "exam",
+            "semantic_status": "scheduled", "date_expression": "02/10/26",
+            "normalized_date": "2026-10-02", "normalized_time": None,
+            "value_kind": "start_at", "evidence_text": "Nonlinear Programming Midterm Exam: 02/10/26",
+        }],
+    }]}
+    applied = service.apply_semantic_review(document.document_id, payload)
+    assert applied["complete"] and applied["confirmed"] == 1
+
+    result = encode(service.query(DeadlineQuery(
+        time_intent=TimeIntent("date_range", "2 October", start_date="2026-10-02", end_date="2026-10-02"),
+        types=("exam",), document_mode="existing",
+    )))
+    assert result["count"] == 1
+    assert result["deadlines"][0]["start_at"] == "2026-10-02T00:00:00+08:00"
+    assert result["deadlines"][0]["sources"][0]["source_authority"] == "canvas_api"
 
 
 def test_changed_approved_version_ingested_before_filter_and_count(tmp_path):
@@ -151,14 +197,23 @@ def test_changed_metadata_same_hash_does_not_reparse(tmp_path, monkeypatch):
     assert query(service)["count"] == 1 and remote.downloads == 2
 
 
-def test_unapproved_version_withholds_stale_deadline_persistently(tmp_path):
+def test_canvas_api_version_updates_without_a_second_approval(tmp_path):
     service, remote, registry, _ = setup(tmp_path, auto=False)
     remote.content, remote.version = pdf(30), "v2"
     result = query(service)
-    assert result["count"] == 0 and not result["complete"] and registry.get("outline").refresh_blocked
+    assert result["count"] == 0 and result["complete"] and not registry.get("outline").refresh_blocked
     assert query(service, "existing")["count"] == 0
     query(service)
-    assert remote.downloads == 1  # Pending version is reused, still withheld.
+    assert remote.downloads == 1
+
+
+def test_legacy_exact_canvas_row_migrates_after_authenticated_listing(tmp_path):
+    service, _, registry, _ = setup(tmp_path, document_id="canvas-12345-99")
+    assert registry.get("canvas-12345-99").source_authority == "operator"
+    result = query(service)
+    document = registry.get("canvas-12345-99")
+    assert result["count"] == 1
+    assert document.source_authority == "canvas_api" and document.approved_by == ""
 
 
 def test_missing_remote_document_withheld_and_recovers_on_reappearance(tmp_path):

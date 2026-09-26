@@ -33,16 +33,16 @@ class DocumentLibraryRefresher:
         except (OSError, ValueError, TypeError, KeyError):
             raise ApplicationError("DOCUMENT_STORE_UNAVAILABLE", "The local document library index is invalid.") from None
         drafts = {r["document_id"]: r for r in pending["documents"]}
-        approved = self.registry.list_documents(tuple(c.course_id for c in courses))
+        trusted = self.registry.list_documents(tuple(c.course_id for c in courses))
         known, actions, warnings, complete = {}, [], [], True
-        approved_by_id = {doc.document_id: doc for doc in approved}
-        for doc in approved:
+        trusted_by_id = {doc.document_id: doc for doc in trusted}
+        for doc in trusted:
             source = urlsplit(doc.source_url)
             match = re.fullmatch(r"/courses/(\d+)/files/(\d+)", source.path)
             if match and match[1] == doc.course_id and source.netloc == urlsplit(self.client.base_url).netloc:
                 key = (doc.course_id, match[2])
                 if key in known:
-                    raise ApplicationError("INVALID_DOCUMENT_REGISTRY", "Multiple approvals refer to the same Canvas file.")
+                    raise ApplicationError("INVALID_DOCUMENT_REGISTRY", "Multiple trusted records refer to the same Canvas file.")
                 known[key] = doc
             elif doc.document_kind not in ("canvas_syllabus", "canvas_page"):
                 complete = False
@@ -94,6 +94,11 @@ class DocumentLibraryRefresher:
                     warnings.append(f"{course.course_code}: document {identifier} is inaccessible; latest version unverified.")
                     actions.append(action)
                     continue
+                # The authenticated course/file listing is the authority event for a
+                # legacy Canvas row that still carries obsolete approval metadata.
+                if doc and doc.source_authority != "canvas_api" and identifier == f"canvas-{course.course_id}-{fid}":
+                    doc = self.preparation.promote_canvas_api(doc)
+                    trusted_by_id[identifier] = doc
                 # Missing version metadata always requires a content hash check.
                 version = {k: file.get(k) for k in ("updated_at", "modified_at", "size", "uuid")}
                 previous = index.get(identifier, {})
@@ -111,8 +116,14 @@ class DocumentLibraryRefresher:
                     if pending_artifact and (pending_artifact[0].parser_version != ParsedDocument.__dataclass_fields__["parser_version"].default
                             or any(v.get("rule_version") != CandidateValidation.__dataclass_fields__["rule_version"].default for _, v in pending_artifact[1])):
                         pending_artifact = None
-                    if metadata_same and ((approved_same) or (pending_same and cached_path.is_file() and pending_artifact is not None)):
-                        action["state"] = "unchanged" if approved_same else "pending_review"
+                    if metadata_same and approved_same:
+                        action["state"] = "unchanged"
+                    elif metadata_same and pending_same and cached_path.is_file():
+                        row = dict(drafts.pop(identifier))
+                        row.update(path=previous["path"], sha256=previous["sha256"])
+                        doc = self.preparation.register_canvas_api(row)
+                        action.update(state="ingested", source_authority="canvas_api",
+                                      ingestion=self.ingestion.ingest(identifier, course))
                     else:
                         if hasattr(self.client, "download_document"):
                             content = self.client.download_document(file.get("url", ""), format_name=format_name,
@@ -132,57 +143,45 @@ class DocumentLibraryRefresher:
                             with destination.open("xb") as out:
                                 out.write(content)
                         index[identifier] = {"version": version, "sha256": digest, "path": relative}
-                        if doc and (digest == doc.sha256 or doc.auto_refresh):
+                        if doc:
                             if digest != doc.sha256 or doc.refresh_blocked or not doc.path.exists():
-                                self._update_approved(doc, digest=digest, path=relative, blocked=False)
+                                self._update_trusted(doc, digest=digest, path=relative, blocked=False)
                             if digest != doc.sha256 or artifact is None or doc.refresh_blocked:
                                 result = self.ingestion.ingest(identifier, course)
                                 action.update(state="updated" if digest != doc.sha256 else "ingested", ingestion=result)
                             else:
                                 action["state"] = "unchanged"
                         else:
-                            drafts[identifier] = {"document_id": identifier, "course_id": course.course_id,
+                            row = {"document_id": identifier, "course_id": course.course_id,
                                 "course_code": course.course_code, "course_name": course.course_name,
                                 "document_name": name, "document_kind": kind,
                                 "source_url": f"{self.client.base_url}/courses/{course.course_id}/files/{fid}",
-                                "path": relative, "sha256": digest, "approved_by": "", "valid_from": None,
-                                "valid_until": None, "active": False}
-                            if doc:
-                                self._update_approved(doc, blocked=True)
-                            action["state"] = "pending_review"
-                    if action["state"] == "pending_review":
-                        row = drafts[identifier]
-                        row["remote_state"] = "pending_review"
-                        pending_artifact = self.scanner.repository.load(self.scanner.draft(row))
-                        if pending_artifact is None or pending_artifact[0].parser_version != ParsedDocument.__dataclass_fields__["parser_version"].default or any(
-                                v.get("rule_version") != CandidateValidation.__dataclass_fields__["rule_version"].default for _, v in pending_artifact[1]):
-                            action["scan"] = self.scanner.scan(row)
-                        else:
-                            action["scan"] = {"state": "reused", "pages": len(pending_artifact[0].pages),
-                                "candidate_count": len(pending_artifact[1]), "scanned_at": pending_artifact[0].parsed_at.isoformat(), "confirmed": 0}
-                        complete = False
-                        warnings.append(f"{course.course_code}: {name} requires official-source/version review; not added as a deadline fact.")
+                                "path": relative, "sha256": digest}
+                            doc = self.preparation.register_canvas_api(row)
+                            drafts.pop(identifier, None)
+                            action.update(state="ingested", source_authority="canvas_api",
+                                          ingestion=self.ingestion.ingest(identifier, course))
                 except ApplicationError as error:
                     if error.code == "CANVAS_AUTH_FAILED":
                         raise
                     complete = False
                     if doc and changed_metadata:
-                        self._update_approved(doc, blocked=True)
+                        self._update_trusted(doc, blocked=True)
                     action.update(state="failed", error_code=error.code)
                     warnings.append(f"{course.course_code}: document update failed ({error.code}); evidence may be incomplete.")
                 except (OSError, ValueError, TypeError):
                     complete = False
                     if doc and changed_metadata:
-                        self._update_approved(doc, blocked=True)
+                        self._update_trusted(doc, blocked=True)
                     action.update(state="failed", error_code="DOCUMENT_STORE_UNAVAILABLE")
                     warnings.append(f"{course.course_code}: document update failed; evidence may be incomplete.")
                 actions.append(action)
             for (cid, fid), doc in known.items():
                 if cid == course.course_id and fid not in seen and inventory_complete:
-                    self._update_approved(doc, blocked=True)
+                    self._update_trusted(doc, blocked=True)
                     complete = False
                     actions.append({"document_id": doc.document_id, "course_code": course.course_code, "state": "missing"})
-                    warnings.append(f"{course.course_code}: approved document {doc.document_id} disappeared from the file library; previous deadlines withheld.")
+                    warnings.append(f"{course.course_code}: trusted document {doc.document_id} disappeared from the file library; previous deadlines withheld.")
             for identifier, row in drafts.items():
                 match = re.fullmatch(r"/courses/(\d+)/files/(\d+)", urlsplit(row.get("source_url", "")).path)
                 if str(row.get("course_id")) == course.course_id and match and match[2] not in seen:
@@ -198,28 +197,25 @@ class DocumentLibraryRefresher:
                 warnings.extend(content_warnings)
                 content_complete = not content_warnings
                 complete = complete and content_complete
-                content_actions = self._refresh_canvas_content(course, content_items, approved_by_id,
+                content_actions = self._refresh_canvas_content(course, content_items, trusted_by_id,
                                                                drafts, index, root)
                 actions.extend(content_actions)
                 seen_content = {item["document_id"] for item in content_items}
                 if content_complete:
-                    for document in approved:
+                    for document in trusted:
                         if (document.course_id == course.course_id
                                 and document.document_kind in ("canvas_syllabus", "canvas_page")
                                 and document.document_id not in seen_content):
-                            self._update_approved(document, blocked=True)
+                            self._update_trusted(document, blocked=True)
                             complete = False
                             actions.append({"document_id": document.document_id, "course_code": course.course_code,
                                             "document_name": document.document_name, "state": "missing"})
-                            warnings.append(f"{course.course_code}: approved Canvas course content {document.document_id} disappeared; previous deadlines withheld.")
+                            warnings.append(f"{course.course_code}: trusted Canvas course content {document.document_id} disappeared; previous deadlines withheld.")
                     for identifier, row in drafts.items():
                         if (str(row.get("course_id")) == course.course_id
                                 and row.get("document_kind") in ("canvas_syllabus", "canvas_page")
                                 and identifier not in seen_content):
                             row["remote_state"] = "missing"
-                if any(action.get("state") == "pending_review" for action in content_actions):
-                    complete = False
-                    warnings.append(f"{course.course_code}: Canvas Syllabus/Page content requires official-source review; not added as a deadline fact.")
                 coverage.append({"course_id": course.course_id, "course_code": course.course_code,
                     "state": "available" if content_complete else "partial", "source_type": "canvas_course_content",
                     "listed_document_count": len(content_items), "processed_document_count": len(content_items),
@@ -238,11 +234,11 @@ class DocumentLibraryRefresher:
                 "scope": "all_course_documents", "course_ids": [c.course_id for c in courses], "coverage": coverage,
                 "actions": actions, "warnings": warnings}
 
-    def _refresh_canvas_content(self, course, items, approved_by_id, drafts, index, root):
+    def _refresh_canvas_content(self, course, items, trusted_by_id, drafts, index, root):
         actions = []
         for item in items:
             identifier, digest = item["document_id"], item["sha256"]
-            document = approved_by_id.get(identifier)
+            document = trusted_by_id.get(identifier)
             relative = f"downloaded/{identifier}-{digest}.html"
             destination = root / relative
             destination.parent.mkdir(exist_ok=True)
@@ -255,41 +251,39 @@ class DocumentLibraryRefresher:
             previous = index.get(identifier, {})
             index[identifier] = {"version": item["version"], "sha256": digest, "path": relative}
             artifact = self.ingestion.repository.load(document) if document else None
+            if artifact and (artifact[0].parser_version != ParsedDocument.__dataclass_fields__["parser_version"].default
+                    or any(v.get("rule_version") != CandidateValidation.__dataclass_fields__["rule_version"].default
+                           for _, v in artifact[1])):
+                artifact = None
             action = {"document_id": identifier, "course_code": course.course_code,
                       "document_name": item["document_name"]}
             if document and digest == document.sha256 and artifact is not None and not document.refresh_blocked:
                 action["state"] = "unchanged"
-            elif document and document.auto_refresh:
-                self._update_approved(document, digest=digest, path=relative, blocked=False)
+            elif document:
+                self._update_trusted(document, digest=digest, path=relative, blocked=False)
                 action.update(state="updated", ingestion=self.ingestion.ingest(identifier, course))
             else:
-                drafts[identifier] = {"document_id": identifier, "course_id": course.course_id,
+                row = {"document_id": identifier, "course_id": course.course_id,
                     "course_code": course.course_code, "course_name": course.course_name,
                     "document_name": item["document_name"], "document_kind": item["document_kind"],
                     "source_url": item["source_url"], "path": relative, "sha256": digest,
-                    "approved_by": "", "valid_from": None, "valid_until": None,
-                    "active": False, "remote_state": "pending_review"}
-                if document:
-                    self._update_approved(document, blocked=True)
-                pending_artifact = self.scanner.repository.load(self.scanner.draft(drafts[identifier]))
-                if pending_artifact is None or previous.get("sha256") != digest:
-                    action["scan"] = self.scanner.scan(drafts[identifier])
-                else:
-                    action["scan"] = {"state": "reused", "pages": len(pending_artifact[0].pages),
-                                      "candidate_count": len(pending_artifact[1]),
-                                      "scanned_at": pending_artifact[0].parsed_at.isoformat(), "confirmed": 0}
-                action["state"] = "pending_review"
+                    }
+                document = self.preparation.register_canvas_api(row)
+                drafts.pop(identifier, None)
+                action.update(state="ingested", source_authority="canvas_api",
+                              ingestion=self.ingestion.ingest(identifier, course))
             actions.append(action)
         return actions
 
-    def _update_approved(self, document, *, digest=None, path=None, blocked):
+    def _update_trusted(self, document, *, digest=None, path=None, blocked):
         data = json.loads(self.registry.path.read_text(encoding="utf-8-sig"))
         row = next(r for r in data["documents"] if r["document_id"] == document.document_id)
         if digest and digest != row["sha256"]:
             row.setdefault("version_history", []).append({"sha256": row["sha256"], "path": row["path"],
                                                          "replaced_at": self.clock().isoformat()})
             row["sha256"] = digest
-            row["version_basis"] = "operator_authorized_same_canvas_file_refresh"
+            row["version_basis"] = ("canvas_api_course_scope" if row.get("source_authority") == "canvas_api"
+                                    else "same_canvas_file_refresh")
         if path:
             row["path"] = path
         row["refresh_blocked"] = blocked

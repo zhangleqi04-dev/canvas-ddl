@@ -65,7 +65,21 @@ class DeadlineService:
         for reference in course_references:
             course = self.course_resolver.resolve(reference, available)
             selected[course.course_id] = course
-        return self.document_preparation.prepare(list(selected.values()), limit=limit)
+        report = self.document_preparation.prepare(list(selected.values()), limit=limit)
+        if self.document_ingestion is not None:
+            course_map = selected
+            for item in report["documents"]:
+                if item.get("state") != "registered":
+                    continue
+                try:
+                    document = self.document_ingestion.registry.get(item["document_id"])
+                    item.update(state="ingested", ingestion=self.document_ingestion.ingest(
+                        item["document_id"], course_map[document.course_id],
+                    ))
+                except ApplicationError as error:
+                    item.update(state="failed", error_code=error.code)
+                    report["status"] = "partial"
+        return report
 
     def approve_document(self, document_id, *, approved_by, valid_from, valid_until):
         if self.document_preparation is None:
@@ -285,7 +299,7 @@ class DeadlineService:
                 relative_evidence = self.document_ingestion.load_relative_week_evidence(courses)
             except ApplicationError as error:
                 docs_complete = False
-                doc_warnings.append(f"Official document evidence is unavailable ({error.code}); totals are incomplete.")
+                doc_warnings.append(f"Trusted course-document evidence is unavailable ({error.code}); totals are incomplete.")
         relative_courses = {e.candidate.course_id for e in relative_evidence}
         document_courses = {d.course_id for d in docs} | relative_courses
         plan = self._plan(query)
@@ -361,11 +375,13 @@ class DeadlineService:
                 value_kind="teaching_week_reference", date_only=True,
                 extraction_mode=evidence.extraction_mode, ocr_engine=evidence.ocr_engine,
                 ocr_confidence=evidence.ocr_confidence, location=candidate.location,
+                source_authority=evidence.source_authority,
             )
             checks = ("DOCUMENT_RELATIVE_WEEK_EVIDENCE", "CANVAS_COURSE_CALENDAR_MAPPING",
                       "NON_CANONICAL_REFERENCE")
             if evidence.source_verified:
-                checks += ("OFFICIAL_REGISTRY",)
+                checks += (("CANVAS_API_AUTHENTICATED_SOURCE",) if evidence.source_authority == "canvas_api"
+                           else ("OPERATOR_TRUSTED_SOURCE",))
             else:
                 checks += ("SOURCE_APPROVAL_REQUIRED",)
             validation = ValidationInfo("reference", "teaching-week-resolver-v1", self.clock(), checks)
@@ -381,21 +397,21 @@ class DeadlineService:
 
     def ingest_document(self, document_id):
         if self.document_ingestion is None:
-            raise ApplicationError("INVALID_CONFIG", "Official document ingestion is not configured.")
+            raise ApplicationError("INVALID_CONFIG", "Course-document ingestion is not configured.")
         document = self.document_ingestion.registry.get(document_id)
         courses = self.list_courses(document.course_id)
         return self.document_ingestion.ingest(document_id, courses[0])
 
     def semantic_review_requests(self, document_id, *, offset=0, limit=20):
         if self.document_ingestion is None:
-            raise ApplicationError("INVALID_CONFIG", "Official document ingestion is not configured.")
+            raise ApplicationError("INVALID_CONFIG", "Course-document ingestion is not configured.")
         document = self.document_ingestion.registry.get(document_id)
         courses = self.list_courses(document.course_id)
         return self.document_ingestion.semantic_review_requests(document_id, courses[0], offset=offset, limit=limit)
 
     def apply_semantic_review(self, document_id, payload):
         if self.document_ingestion is None:
-            raise ApplicationError("INVALID_CONFIG", "Official document ingestion is not configured.")
+            raise ApplicationError("INVALID_CONFIG", "Course-document ingestion is not configured.")
         document = self.document_ingestion.registry.get(document_id)
         courses = self.list_courses(document.course_id)
         return self.document_ingestion.apply_semantic_review(document_id, courses[0], payload)

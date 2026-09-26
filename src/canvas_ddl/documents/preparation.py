@@ -1,4 +1,4 @@
-"""Download course-scoped candidates; authority still requires operator review."""
+"""Download course-scoped documents; authenticated Canvas course sources are trusted."""
 import hashlib
 import json
 import re
@@ -81,10 +81,11 @@ class DocumentPreparationService:
                            "course_code": course.course_code, "course_name": course.course_name,
                            "document_name": name, "document_kind": kind,
                            "source_url": f"{self.client.base_url}/courses/{course.course_id}/files/{file_id}",
-                           "path": relative, "sha256": digest, "approved_by": "",
-                           "valid_from": None, "valid_until": None, "active": False}
-                    by_id[identifier] = row
-                    result.update(state="pending_review", path=str(destination), suggested_kind=kind, sha256=digest)
+                           "path": relative, "sha256": digest}
+                    self.register_canvas_api(row)
+                    by_id.pop(identifier, None)
+                    result.update(state="registered", path=str(destination), suggested_kind=kind, sha256=digest,
+                                  source_authority="canvas_api")
                 except ApplicationError as error:
                     if error.code == "CANVAS_AUTH_FAILED":
                         raise
@@ -98,12 +99,54 @@ class DocumentPreparationService:
                 warnings.append({"course_code": course.course_code, "error_code": "NO_HINTED_DOCUMENT_CANDIDATES",
                                  "message": "No filename-matched supported document candidates were found; document coverage is not established."})
         self._write(pending_path, {"documents": list(by_id.values())})
-        return {"status": "partial" if warnings or any(r["state"] != "pending_review" for r in results) else "ok",
-                "requires_review": True, "documents": results, "warnings": warnings,
+        return {"status": "partial" if warnings or any(r["state"] != "registered" for r in results) else "ok",
+                "requires_review": False, "documents": results, "warnings": warnings,
                 "review_file": str(pending_path)}
 
+    def register_canvas_api(self, row):
+        """Register an authenticated, course-scoped Canvas API document without human approval."""
+        record = dict(row)
+        record.update(approved_by="", source_authority="canvas_api", valid_from="0001-01-01",
+                      valid_until="9999-12-31", active=True, auto_refresh=True, refresh_blocked=False)
+        try:
+            data = json.loads(self.registry.path.read_text(encoding="utf-8-sig")) if self.registry.path.exists() else {"documents": []}
+            data["documents"] = [item for item in data["documents"] if item["document_id"] != record["document_id"]] + [record]
+            temporary = self.registry.path.with_suffix(".canvas-api.tmp")
+            try:
+                self._write(temporary, data)
+                from .registry import OfficialDocumentRegistry
+                check = OfficialDocumentRegistry(temporary, canvas_origin=self.client.base_url,
+                                                 official_hosts=tuple(self.registry.hosts - {self.registry.canvas_host}))
+                check.get(record["document_id"])
+                temporary.replace(self.registry.path)
+            finally:
+                temporary.unlink(missing_ok=True)
+            return self.registry.get(record["document_id"])
+        except ApplicationError:
+            raise
+        except (OSError, ValueError, TypeError, KeyError):
+            raise ApplicationError("DOCUMENT_REVIEW_FAILED", "Canvas course document registration failed.") from None
+
+    def promote_canvas_api(self, document):
+        """Migrate a legacy approved Canvas row after its scoped API identity is observed."""
+        try:
+            relative = document.path.resolve().relative_to(self.registry.path.parent.resolve()).as_posix()
+        except ValueError:
+            raise ApplicationError("INVALID_DOCUMENT_REGISTRY", "A Canvas document path is outside the document store.") from None
+        return self.register_canvas_api({
+            "document_id": document.document_id,
+            "course_id": document.course_id,
+            "course_code": document.course_code,
+            "course_name": document.course_name,
+            "document_name": document.document_name,
+            "document_kind": document.document_kind,
+            "source_url": document.source_url,
+            "path": relative,
+            "sha256": document.sha256,
+        })
+
     def approve(self, document_id, *, approved_by, valid_from, valid_until):
-        """Called only by an explicit operator approval command, never ordinary queries."""
+        """Retained for non-Canvas external sources that require explicit operator trust."""
         try:
             first, last = date.fromisoformat(valid_from), date.fromisoformat(valid_until)
             if first > last:

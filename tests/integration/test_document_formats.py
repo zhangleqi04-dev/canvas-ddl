@@ -141,7 +141,7 @@ def test_standalone_image_uses_local_ocr_then_independent_validation(tmp_path):
     assert deadlines[0].sources[0].ocr_engine == "PP-OCRv6_small"
 
 
-def test_canvas_syllabus_and_pages_are_discovered_scanned_and_left_pending_review(tmp_path):
+def test_canvas_syllabus_and_pages_are_auto_registered_and_ingested(tmp_path):
     class ContentClient:
         base_url = "https://canvas.example"
         def get_paginated(self, path, **_kwargs):
@@ -166,15 +166,12 @@ def test_canvas_syllabus_and_pages_are_discovered_scanned_and_left_pending_revie
     refresher = DocumentLibraryRefresher(DocumentPreparationService(client, registry), ingestion, clock=lambda: NOW)
     report = refresher.refresh([COURSE])
     pending = json.loads((tmp_path / "pending-review.json").read_text(encoding="utf8"))["documents"]
-    assert report["scope"] == "all_course_documents" and len(pending) == 2
-    assert {row["document_kind"] for row in pending} == {"canvas_syllabus", "canvas_page"}
-    assert all(action["state"] == "pending_review" for action in report["actions"])
-    assert all(action["scan"]["candidate_count"] == 1 for action in report["actions"])
-    assert registry.list_documents() == ()
-    syllabus_id = next(row["document_id"] for row in pending if row["document_kind"] == "canvas_syllabus")
-    refresher.preparation.approve(syllabus_id, approved_by="fixture-human",
-                                  valid_from="2026-08-01", valid_until="2026-12-31")
-    assert ingestion.ingest(syllabus_id, COURSE)["confirmed"] == 1
+    assert report["scope"] == "all_course_documents" and pending == []
+    documents = registry.list_documents()
+    assert {row.document_kind for row in documents} == {"canvas_syllabus", "canvas_page"}
+    assert all(row.source_authority == "canvas_api" for row in documents)
+    assert all(action["state"] == "ingested" for action in report["actions"])
+    assert all(action["ingestion"]["confirmed"] == 1 for action in report["actions"])
 
 
 def test_course_document_inventory_includes_supported_modern_formats_only():

@@ -8,7 +8,7 @@ from canvas_ddl.deadlines.normalizer import DeadlineNormalizer
 from .parser import DocumentParser
 from .extractor import DeadlineExtractor
 from .models import ParsedDocument, RelativeWeekEvidence
-from .semantic import CodexSemanticExtractor, LightSemanticPrefilter, StructuralChunker, request_batch
+from .semantic import SCHEMA_VERSION, CodexSemanticExtractor, LightSemanticPrefilter, StructuralChunker, request_batch
 
 
 class DocumentIngestionService:
@@ -45,7 +45,9 @@ class DocumentIngestionService:
                 "unresolved": len(semantic_requests) if self.require_semantic_review else sum(v.status == "unresolved" for v in validations),
                 "rejected": 0 if self.require_semantic_review else sum(v.status == "rejected" for v in validations),
                 "legacy_rule_candidates": len(candidates),
+                "plain_fallback_pages": [p.page for p in parsed.pages if p.extraction_mode == "plain"],
                 "ocr_pages": [p.page for p in parsed.pages if p.extraction_mode == "ocr_ppocrv6_small"],
+                "empty_pages": [p.page for p in parsed.pages if not p.text.strip()],
                 "semantic_review_required": bool(semantic_requests),
                 "semantic_review_total": len(semantic_requests),
                 "warnings": [self._page_warning(p) for p in parsed.pages if self._page_warning(p)]}
@@ -82,17 +84,17 @@ class DocumentIngestionService:
             raise ApplicationError("DOCUMENT_COURSE_MISMATCH", "The registered document does not match the current resolved course.")
         loaded = self.repository.load(document)
         if loaded is None:
-            raise ApplicationError("DOCUMENT_NOT_INGESTED", "Parse the approved document before applying semantic review.")
+            raise ApplicationError("DOCUMENT_NOT_INGESTED", "Ingest the trusted document before applying semantic review.")
         parsed, _ = loaded
         if parsed.parser_version != ParsedDocument.__dataclass_fields__["parser_version"].default:
-            raise ApplicationError("DOCUMENT_NOT_INGESTED", "Re-parse the approved document before applying semantic review.")
+            raise ApplicationError("DOCUMENT_NOT_INGESTED", "Re-ingest the trusted document before applying semantic review.")
         requests = self._semantic_requests(parsed, document)
         batch_reviews, _ = self.semantic_extractor.parse_batch(
             payload, document=document, parsed=parsed, requests=requests,
         )
         reviews = self.repository.load_semantic_reviews(document)
         reviews.update(batch_reviews)
-        combined = {"schema_version": "codex-semantic-v1", "document_id": document.document_id,
+        combined = {"schema_version": SCHEMA_VERSION, "document_id": document.document_id,
                     "document_sha256": parsed.sha256, "reviews": list(reviews.values())}
         reviews, candidates = self.semantic_extractor.parse_batch(
             combined, document=document, parsed=parsed, requests=requests,
@@ -102,7 +104,7 @@ class DocumentIngestionService:
         self.repository.save_semantic(parsed, candidates, validations, reviews, course.course_id)
         complete = {request.request_id for request in requests} == set(reviews)
         return {"document_id": document_id, "document_name": document.document_name,
-                "schema_version": "codex-semantic-v1", "reviewed": len(reviews),
+                "schema_version": SCHEMA_VERSION, "reviewed": len(reviews),
                 "total": len(requests), "complete": complete,
                 "confirmed": sum(v.status == "confirmed" for v in validations),
                 "unresolved": sum(v.status == "unresolved" for v in validations),
@@ -132,7 +134,7 @@ class DocumentIngestionService:
             return requests, reviews, None, "invalid"
         if request_ids - review_ids:
             return requests, reviews, None, "incomplete"
-        payload = {"schema_version": "codex-semantic-v1", "document_id": document.document_id,
+        payload = {"schema_version": SCHEMA_VERSION, "document_id": document.document_id,
                    "document_sha256": parsed.sha256, "reviews": list(reviews.values())}
         try:
             _validated_reviews, expected = self.semantic_extractor.parse_batch(
@@ -156,24 +158,26 @@ class DocumentIngestionService:
             info = {"document_id": document.document_id, "document_name": document.document_name,
                     "course_id": document.course_id, "state": "available", "confirmed": 0, "unresolved": 0,
                     "rejected": 0, "ingested_at": None, "candidate_issues": [], "source_url": document.source_url,
-                    "valid_from": document.valid_from.isoformat(), "valid_until": document.valid_until.isoformat(), "source_verified": True}
+                    "valid_from": (document.valid_from.isoformat() if document.source_authority == "operator" else None),
+                    "valid_until": (document.valid_until.isoformat() if document.source_authority == "operator" else None),
+                    "source_verified": True, "source_authority": document.source_authority}
             if document.refresh_blocked:
-                info["state"] = "remote_version_requires_review"
+                info["state"] = "remote_version_unavailable"
                 complete = False
-                warnings.append(f"Official document {document.document_id}: remote evidence changed or disappeared; previous deadlines withheld.")
+                warnings.append(f"Trusted course document {document.document_id}: remote evidence changed or disappeared; previous deadlines withheld.")
                 summary.append(info)
                 continue
             if loaded is None or document.course_code != course_map[document.course_id].course_code:
                 info["state"] = "not_ingested_or_version_mismatch"
                 complete = False
-                warnings.append(f"Official document {document.document_id}: approved version requires ingestion.")
+                warnings.append(f"Trusted course document {document.document_id}: current version requires ingestion.")
                 summary.append(info)
                 continue
             parsed, rows = loaded
             if parsed.parser_version != ParsedDocument.__dataclass_fields__["parser_version"].default:
                 info["state"] = "parser_version_mismatch"
                 complete = False
-                warnings.append(f"Official document {document.document_id}: parser changed; re-ingestion required.")
+                warnings.append(f"Trusted course document {document.document_id}: parser changed; re-ingestion required.")
                 summary.append(info)
                 continue
             info["ingested_at"] = parsed.parsed_at.isoformat()
@@ -185,7 +189,7 @@ class DocumentIngestionService:
                 )
                 missing = [request for request in semantic_requests if request.request_id not in semantic_reviews]
                 info.update({"semantic_review_required": semantic_issue is not None,
-                             "semantic_review_schema": "codex-semantic-v1",
+                             "semantic_review_schema": SCHEMA_VERSION,
                              "semantic_review_total": len(semantic_requests),
                              "semantic_reviewed": len(semantic_reviews),
                              "semantic_review_pending": len(missing)})
@@ -197,7 +201,7 @@ class DocumentIngestionService:
                                     else "CODEX_SEMANTIC_REVIEW_REQUIRED"],
                         "pending_chunks": len(missing)})
                     warning = "is invalid" if semantic_issue == "invalid" else "is incomplete"
-                    warnings.append(f"Official document {document.document_id}: Codex semantic review {warning}; document deadlines withheld.")
+                    warnings.append(f"Trusted course document {document.document_id}: Codex semantic review {warning}; document deadlines withheld.")
                     summary.append(info)
                     continue
                 rows = semantic_rows
@@ -206,12 +210,12 @@ class DocumentIngestionService:
             if incomplete_pages:
                 complete = False
                 for page in incomplete_pages:
-                    warnings.append(f"Official document {document.document_id}: {self._page_warning(page)}")
+                    warnings.append(f"Trusted course document {document.document_id}: {self._page_warning(page)}")
             for candidate, stored in rows:
                 # Re-run independent checks on the persisted page evidence, never
                 # parse the source document during a deadline query or trust a stored LLM flag.
                 validation = self.validator.validate_candidate(candidate, parsed, document, now=parsed.parsed_at)
-                if self.require_semantic_review and candidate.extractor != "codex-semantic-v1":
+                if self.require_semantic_review and candidate.extractor != SCHEMA_VERSION:
                     complete = False
                     info["unresolved"] += 1
                     info["candidate_issues"].append({"candidate_id": candidate.candidate_id,
@@ -223,7 +227,7 @@ class DocumentIngestionService:
                     continue
                 if stored.get("rule_version") != validation.rule_version:
                     complete = False
-                    warnings.append(f"Official document {document.document_id}: validator changed; re-ingestion required.")
+                    warnings.append(f"Trusted course document {document.document_id}: validator changed; re-ingestion required.")
                     continue
                 try:
                     original_validation_time = datetime.fromisoformat(stored["validated_at"])
@@ -243,10 +247,10 @@ class DocumentIngestionService:
                                                     "title": candidate.title, "status": validation.status, "reasons": list(validation.reasons),
                                                     "evidence_text": candidate.evidence_text, "validation_rule_version": validation.rule_version,
                                                     "validated_at": validation.validated_at.isoformat()})
-                    warnings.append(f"Official document {document.document_id}, {candidate.location or f'page {candidate.page}'}: {validation.status} candidate ({validation.reasons[0]}); not counted.")
+                    warnings.append(f"Trusted course document {document.document_id}, {candidate.location or f'page {candidate.page}'}: {validation.status} candidate ({validation.reasons[0]}); not counted.")
             summary.append(info)
         if not documents:
-            warnings.append("No official documents are registered for these courses; document coverage has not been established.")
+            warnings.append("No trusted course documents are registered for these courses; document coverage has not been established.")
         pending_path = self.registry.path.parent / "pending-review.json"
         if pending_path.exists():
             try:
@@ -263,15 +267,15 @@ class DocumentIngestionService:
     def search_content(self, courses, *, types=None, extra_exam_keywords=()):
         from .search import DocumentContentSearcher
         course_map = {c.course_id: c for c in courses}
-        approved = {d.document_id: d for d in self.registry.list_documents(tuple(course_map))}
-        inputs = [(d, self.repository, True) for d in approved.values() if not d.refresh_blocked]
+        trusted = {d.document_id: d for d in self.registry.list_documents(tuple(course_map))}
+        inputs = [(d, self.repository, True) for d in trusted.values() if not d.refresh_blocked]
         pending_path = self.registry.path.parent / "pending-review.json"
         if pending_path.exists():
             rows = json.loads(pending_path.read_text(encoding="utf8"))["documents"]
             for row in rows:
                 if str(row.get("course_id")) not in course_map or row.get("remote_state") in ("missing", "inaccessible"):
                     continue
-                doc = approved.get(row.get("document_id"))
+                doc = trusted.get(row.get("document_id"))
                 if doc and doc.sha256 == row.get("sha256") and not doc.refresh_blocked:
                     continue
                 inputs.append((self.scanner.draft(row), self.scanner.repository, False))
@@ -300,14 +304,15 @@ class DocumentIngestionService:
                           if line == candidate.evidence_text and i < len(page.line_confidences)), default=None)
         return RelativeWeekEvidence(candidate, validation, document.document_name, document.source_url,
                                     document.sha256, parsed.parsed_at, page.extraction_mode,
-                                    page.ocr_engine, confidence, source_verified)
+                                    page.ocr_engine, confidence, source_verified,
+                                    getattr(document, "source_authority", None))
 
     def load_relative_week_evidence(self, courses):
         """Load already-extracted Week N proposals; never opens a source document."""
         course_map = {c.course_id: c for c in courses}
-        approved = {d.document_id: d for d in self.registry.list_documents(tuple(course_map))}
+        trusted = {d.document_id: d for d in self.registry.list_documents(tuple(course_map))}
         result = []
-        for document in approved.values():
+        for document in trusted.values():
             if document.refresh_blocked:
                 continue
             loaded = self.repository.load(document)
@@ -322,7 +327,7 @@ class DocumentIngestionService:
                     continue
                 rows = semantic_rows
             for candidate, stored in rows:
-                if self.require_semantic_review and candidate.extractor != "codex-semantic-v1":
+                if self.require_semantic_review and candidate.extractor != SCHEMA_VERSION:
                     continue
                 validation = self.validator.validate_candidate(candidate, parsed, document, now=parsed.parsed_at)
                 if stored.get("rule_version") != validation.rule_version:
@@ -341,7 +346,7 @@ class DocumentIngestionService:
                 if str(row.get("course_id")) not in course_map or row.get("remote_state") in ("missing", "inaccessible"):
                     continue
                 document = self.scanner.draft(row)
-                current = approved.get(document.document_id)
+                current = trusted.get(document.document_id)
                 if current and current.sha256 == document.sha256 and not current.refresh_blocked:
                     continue
                 loaded = self.scanner.repository.load(document)

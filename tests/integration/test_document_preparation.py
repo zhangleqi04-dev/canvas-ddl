@@ -45,28 +45,30 @@ def setup(tmp_path, files=None, handler=None):
     return preparation, registry, requests, content
 
 
-def test_preparation_downloads_without_approving_or_leaking_url(tmp_path):
+def test_preparation_auto_registers_authenticated_canvas_file_without_leaking_url(tmp_path):
     prepare, registry, requests, content = setup(tmp_path)
     result = prepare.prepare([COURSE])
-    row = json.loads((tmp_path / "pending-review.json").read_text())["documents"][0]
-    assert result["requires_review"] and result["documents"][0]["state"] == "pending_review"
-    assert row["active"] is False and row["approved_by"] == "" and row["valid_from"] is None
+    row = json.loads(registry.path.read_text())["documents"][0]
+    assert not result["requires_review"] and result["documents"][0]["state"] == "registered"
+    assert row["active"] is True and row["source_authority"] == "canvas_api" and row["approved_by"] == ""
     assert row["course_id"] == COURSE.course_id and row["sha256"] == hashlib.sha256(content).hexdigest()
-    assert registry.list_documents() == ()
+    assert registry.list_documents()[0].source_authority == "canvas_api"
     assert (tmp_path / row["path"]).read_bytes() == content
-    assert TOKEN not in (tmp_path / "pending-review.json").read_text()
+    assert TOKEN not in registry.path.read_text()
     assert all(r.headers["authorization"] == f"Bearer {TOKEN}" for r in requests)
 
 
-def test_explicit_review_registers_and_engine_ingests(tmp_path):
+def test_prepare_documents_registers_and_engine_ingests_without_review(tmp_path):
     prepare, registry, _, _ = setup(tmp_path)
     prepare.prepare([COURSE])
     ingestion = DocumentIngestionService(registry, DocumentRepository(tmp_path / "docs.sqlite3"),
         timezone="Asia/Singapore", base_url=prepare.client.base_url, clock=lambda: datetime.now(timezone.utc))
     service = DeadlineService(prepare.client, base_url=prepare.client.base_url, document_ingestion=ingestion,
         document_preparation=prepare, repository=SimpleNamespace(list_courses=lambda: [COURSE]), collectors=[])
-    result = service.approve_document("canvas-12345-99", approved_by="maintainer", valid_from="2026-08-01", valid_until="2026-12-31")
-    assert result["confirmed"] == 1 and len(registry.list_documents()) == 1
+    result = service.prepare_documents(["CS3244"])
+    assert result["documents"][0]["state"] == "ingested"
+    assert result["documents"][0]["ingestion"]["confirmed"] == 1
+    assert len(registry.list_documents()) == 1
 
 
 @pytest.mark.parametrize("approver", ["Codex", "LLM", "", "replace-me"])
@@ -75,17 +77,19 @@ def test_no_manufactured_approval(tmp_path, approver):
     prepare.prepare([COURSE])
     with pytest.raises(ApplicationError):
         prepare.approve("canvas-12345-99", approved_by=approver, valid_from="2026-08-01", valid_until="2026-12-31")
-    assert registry.list_documents() == ()
+    assert registry.list_documents()[0].source_authority == "canvas_api"
 
 
-def test_changed_download_cannot_be_approved(tmp_path):
+def test_registered_canvas_file_hash_still_binds_ingestion(tmp_path):
     prepare, registry, _, _ = setup(tmp_path)
     result = prepare.prepare([COURSE])
     from pathlib import Path
     Path(result["documents"][0]["path"]).write_bytes(b"changed")
-    with pytest.raises(ApplicationError, match="unchanged"):
-        prepare.approve("canvas-12345-99", approved_by="maintainer", valid_from="2026-08-01", valid_until="2026-12-31")
-    assert registry.list_documents() == ()
+    ingestion = DocumentIngestionService(registry, DocumentRepository(tmp_path / "docs.sqlite3"),
+        timezone="Asia/Singapore", base_url=prepare.client.base_url, clock=lambda: datetime.now(timezone.utc))
+    with pytest.raises(ApplicationError) as error:
+        ingestion.ingest("canvas-12345-99", COURSE)
+    assert error.value.code == "DOCUMENT_HASH_MISMATCH"
 
 
 def test_redirect_never_forwards_auth_to_approved_external_host(tmp_path):
@@ -97,7 +101,7 @@ def test_redirect_never_forwards_auth_to_approved_external_host(tmp_path):
     prepare, _, requests, _ = setup(tmp_path, handler=route)
     prepare.allowed_hosts = ("cdn.example",)
     result = prepare.prepare([COURSE])
-    assert result["documents"][0]["state"] == "pending_review"
+    assert result["documents"][0]["state"] == "registered"
     assert len(requests) == 3 and "signature" not in (tmp_path / "pending-review.json").read_text()
 
 
@@ -108,15 +112,15 @@ def test_unapproved_redirect_refused_before_request(tmp_path):
     assert len(requests) == 2 and registry.list_documents() == ()
 
 
-def test_canvas_storage_destination_supported_without_evidence_approval(tmp_path):
+def test_canvas_storage_destination_supported_with_canvas_api_authority(tmp_path):
     def route(request):
         if request.url.host == "canvas.example":
             return httpx.Response(302, headers={"Location": "https://a123-99.cluster273.canvas-user-content.com/file"})
         assert "authorization" not in request.headers
         return httpx.Response(200, content=pdf())
     prepare, registry, _, _ = setup(tmp_path, handler=route)
-    assert prepare.prepare([COURSE])["documents"][0]["state"] == "pending_review"
-    assert registry.list_documents() == ()
+    assert prepare.prepare([COURSE])["documents"][0]["state"] == "registered"
+    assert registry.list_documents()[0].source_authority == "canvas_api"
 
 
 def test_similar_storage_hostname_does_not_bypass_allowlist(tmp_path):
@@ -143,18 +147,17 @@ def test_only_hinted_visible_supported_documents_and_safe_local_names(tmp_path):
     result = prepare.prepare([COURSE])
     assert len(result["documents"]) == 2
     assert {item["document_id"] for item in result["documents"]} == {"canvas-12345-2", "canvas-12345-4"}
-    rows = json.loads((tmp_path / "pending-review.json").read_text())["documents"]
+    rows = json.loads((tmp_path / "registry.json").read_text())["documents"]
     assert any(row["path"].startswith("downloaded/canvas-12345-4-") for row in rows)
 
 
-def test_limit_and_repeat_keep_registry_approval_untouched(tmp_path):
+def test_limit_and_repeat_keep_canvas_registry_authority(tmp_path):
     files = [{"id": i, "display_name": "Outline.pdf", "url": "https://canvas.example/files/99/download"} for i in (1, 2)]
     prepare, registry, _, _ = setup(tmp_path, files=files)
     result = prepare.prepare([COURSE], limit=1)
     assert len(result["documents"]) == 1 and result["status"] == "partial"
-    prepare.approve("canvas-12345-1", approved_by="maintainer", valid_from="2026-08-01", valid_until="2026-12-31")
     prepare.prepare([COURSE], limit=1)
-    assert registry.get("canvas-12345-1").approved_by == "maintainer"
+    assert registry.get("canvas-12345-1").source_authority == "canvas_api"
 
 
 def test_cli_requires_explicit_courses_and_official_confirmation(tmp_path):

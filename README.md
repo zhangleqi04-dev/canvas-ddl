@@ -9,8 +9,8 @@ Python 引擎负责事实、验证、来源优先级、分类、去重与计数�
 
 默认考试查询会检查选中课程的全部可访问受支持文档以及 Canvas Syllabus/Pages，即使 Canvas 已有考试记录，
 也会检查文档中是否有其他安排。其他查询在已有完整结果时直接返回；空或不完整
-结果检查相关课程文件库。已批准文件的 auto_refresh=true 允许同一个 Canvas
-文件 ID 的后续版本自动更新并重新 ingestion；新来源仍需确认官方性。
+结果检查相关课程文件库。认证 Canvas API 返回的课程文件会按课程 ID、文件 ID 和内容哈希自动登记；
+同一文件的后续版本自动更新并重新 ingestion，无需人工批准。外部链接和手工本地文件仍需维护者建立信任记录。
 相同版本复用本地证据，旧文件消失或已知变更无法纳入时，旧日期会被停用。
 
 显式查询上传文档/最新文件时加 `--document-mode refresh`；需要仅使用当前证据时
@@ -91,107 +91,65 @@ Skill 由 Codex 理解时间，输出 TimeIntent，再由 Python 验证并计算
 --start/--end；后两者只接受用户或已验证锚点给出的明确 ISO 时间戳。
 详见 [时间意图接口](skills/canvas-ddl/references/time-intent.md)。
 返回 UTF-8 JSON。技能从项目或 CANVAS_DDL_HOME 找到同一个引擎，读取已 ingestion 的证据，
-不自行读源文档、抽取日期、处理冲突或批准官方来源。
+不自行读源文档、决定来源、处理冲突或把语义结果直接当成事实。
 
-## 官方文档 ingestion
+## 课程文档 ingestion
 
-首次官方来源批准是显式维护；后续文档依赖查询可通过引擎自动检查及更新已授权版本。
+Canvas Files API、Canvas Syllabus 和已发布 Pages 是认证、课程范围内的来源。引擎验证
+Canvas origin、课程路径、资源 ID 和内容哈希后，以 `source_authority=canvas_api` 自动登记，
+不要求人工填写 `approved_by` 或教学期间，也不会进入来源批准队列。未变更的版本直接复用
+SQLite 证据；新版本重新解析并保留版本历史。资源消失、当前版本下载失败或哈希异常时，
+旧 deadline 会被扣留并将查询标为 partial。
 
-### 使用现有 Canvas .env 自动准备
-
-无需手动下载和填写课程/链接/hash，运行以下课程范围内的准备命令：
+显式准备命令仍可使用已有 Canvas `.env`：
 
 ```text
 canvas-ddl prepare-documents --course COURSE101 --course COURSE102
 ```
 
-引擎通过 Canvas Files API 查找文件名含 syllabus、outline、handout 等提示的可访问
-受支持文档，最多下载20份，保存在 documents/downloaded，并生成 documents/pending-review.json。
-提示词只用于发现候选，不证明官方性；权限失败、没有匹配和下载失败均明确返回。
-Canvas 公布的文件存储域名可用于下载，其他域名需 CANVAS_DOCUMENT_HOSTS 明确配置；
-Canvas token 只发送到 Canvas 本身，签名下载 URL 不写入登记表或输出。
-下载域名允许列表与文档官方来源批准是两个独立规则。
+该命令通过 Canvas Files API 查找文件名带 syllabus、outline、handout 等提示的受支持文档，
+最多处理 20 份并自动登记。普通考试查询使用更完整的文件库刷新：检查全部可访问受支持
+文件，不按文件名筛选，也没有 20 份默认上限。Canvas 文件显示名可以没有扩展名，只要 API
+MIME 类型明确受支持。本地支持 PDF、DOCX、PPTX、XLSX、CSV、TXT/Markdown、RTF、HTML
+和 PNG/JPEG/WebP/TIFF/BMP；DOC/PPT/XLS、ZIP 和音视频转录暂不处理。Canvas token 只发给
+Canvas origin；签名下载地址不写入登记表。`CANVAS_DOCUMENT_HOSTS` 只控制下载传输域名，
+不会给任意外部页面授予课程来源身份。
 
-当前解析器支持 PDF、DOCX、PPTX、XLSX、CSV、TXT/Markdown、RTF、HTML 和
-PNG/JPEG/WebP/TIFF/BMP。Canvas Syllabus 和已发布 Pages 也会在刷新阶段生成 HTML
-候选。DOC/PPT/XLS、ZIP 和音视频转录暂不处理。所有新来源先进入 pending review；
-成功解析不等于官方性。来源位置分别记录为页码、幻灯片、段落/表格行、工作表行、
-文本行、HTML block 或图片。
-
-维护者查看实际 PDF 和官方课程页面，确认官方性、文档类型与适用教学期间后，
-执行显式批准命令；请将下面的姓名和日期替换为实际值：
+`approve-document` 仅保留给外部 URL 或手工放入的本地官方课程文档。维护者必须核对课程、
+文档类型、适用教学期间和内容哈希，并提供真实身份；Codex/LLM 不能代填。这个外部来源
+流程不会应用于认证 Canvas Files/Syllabus/Pages。
 
 ```text
-canvas-ddl approve-document --document canvas-12345-67890 --approved-by "你的姓名" --valid-from "YYYY-MM-DD" --valid-until "YYYY-MM-DD" --confirm-official
-```
+# 仅适用于 external/manual pending source
+canvas-ddl approve-document --document external-course-outline --approved-by "你的姓名" --valid-from "YYYY-MM-DD" --valid-until "YYYY-MM-DD" --confirm-official
 
-此命令批准待审核记录、保留其他已登记文件，然后解析并生成 Codex 语义审核任务；重复准备
-不会覆盖已有批准。auto_refresh=false 的变更版本需审核；true 只授权原文件 ID 的
-后续版本，不会批准新的来源。pending 文件中的 active=false、
-空 approved_by 和未知教学期间会阻止它直接参与查询。不要让 Codex代替你填写批准。
-没有匹配名称的课程 PDF 仍可按下面的手动流程登记；当前不扫描公告、邮件或所有附件。
-
-接口依据 [Canvas Files API](https://developerdocs.instructure.com/services/canvas/resources/files)，
-下载域名依据 [Canvas 官方域名说明](https://community.instructure.com/en/kb/articles/485223-canvas-domain-email-and-server-management)。
-
-### 手动登记
-
-1. **维护者确认来源**：核对 PDF 来自课程官方 syllabus、course outline、handout
-   或明确官方课程文件，确认课程及教学期间。文件名或自称“官方”不构成批准。
-2. 下载并保存 PDF，在 `documents/registry.json` 登记已审核记录；字段见
-   `documents/registry.example.json`。填写实际 approved_by，不得让 Codex/LLM
-   虚构人为批准。路径相对于 registry 文件所在目录。
-3. 记录其 SHA-256，并运行 ingestion。默认允许 Canvas 本身的域名；其他学校域名
-   必须先在 CANVAS_DOCUMENT_HOSTS 中明确批准（逗号分隔，精确 hostname）。
-
-```text
-# 获取本地 PDF 内容哈希，填写 registry 的 sha256 字段
-python -c "import hashlib,pathlib; p=pathlib.Path('documents/Course Outline 2026.pdf'); print(hashlib.sha256(p.read_bytes()).hexdigest())"
-
-# 以下 ID 必须已存在于人工审核后的 registry
-canvas-ddl ingest --document cs3244-outline-2026
-
-# 查看 ingestion 状态、confirmed/unresolved/rejected 候选信息
+# 查看登记、ingestion 和语义审核状态
 canvas-ddl documents
 ```
 
-sha256 字段要求 64 位小写十六进制。registry 还要求 course_id/code/name、文档类型、
-名称、官方 source_url、有效课程日期范围、approved_by。原文档变更后须更新批准的
-hash 并重新 ingestion，或由明确授权的 auto_refresh 流程完成；active=false 可撤销登记。
-未批准、哈希不符或课程不符不能导入。自动更新保留 version_history 和真实批准者；
-refresh_blocked=true 会将已知过期的版本排除查询。允许同源更新的文档需在本地 registry 中明确设置 auto_refresh。
-
-项目初始 registry 为空；当前登记/导入状态可用 `documents` 命令查看。
-这份登记是受信任的本地管理配置；填写 URL 本身不能证明本地文件真的来自该地址。
+文档 pipeline：
 
 ```text
-DocumentParser → StructuralChunker → LightSemanticPrefilter → Codex semantic extractor
+Canvas API scoped identity 或 operator trust
+→ DocumentParser → StructuralChunker → LightSemanticPrefilter
+→ Codex semantic extractor (codex-semantic-v2)
 → SemanticDeadlineCandidate → Python DeadlineValidator
 → SQLite 文档证据（source units、semantic reviews、proposals、validation audit）
 ```
 
-运行时不再用“关键词命中 + 整段只能有一个日期”决定事实。Python 生成有位置和哈希的
-结构块，Codex Skill 按严格 JSON 语义识别实际安排、统计术语、示例、否定和多个事件，
-并为每个逻辑事件选择原文中的精确证据及日期。validator 独立核对原文锚点、位置、
-页码、明确日期/年份/时刻、类型/角色枚举、课程和已批准内容版本。Codex 不能批准来源、
-补全缺失日期、决定冲突或计数。最终查询读取持久化证据并重新验证；此前更新阶段仅在需要
-入库新内容时解析 PDF，未变更的文档不会每次重新解析。
+Codex 为每个逻辑事件同时返回：原文中的精确 `date_expression`、标准化
+`normalized_date=YYYY-MM-DD` 和可选 `normalized_time=HH:MM`。因此 `02/10/26`、
+`24th November`、`2:00pm` 等不必先由正则转换成 ISO。Python 仍会独立检查标准日期是否
+是原文表达的可能读法、原文 span 是否存在、完整文档是否只有一个可用年份、Canvas/
+operator 来源边界、课程、哈希、位置、OCR 置信度和语义角色。Codex 不能批准来源、决定
+冲突、去重或计数。含糊的数值日期可由 Codex 根据课程上下文选择日/月顺序，但映射不在
+原文字面可能范围内就会被拒绝；缺失年份且全文没有唯一年份时保持 unresolved。
 
-当查询结果出现 `semantic_review_required=true` 时，`$canvas-ddl` 会分批调用
-`semantic-review-requests`，生成逐块审核 JSON，通过 `semantic-ingest` 交回 Python，
-完成后重跑原查询。审核未完成时，该文档的 deadline 会被暂时扣留，结果保持 partial。
-
-当前支持 ISO yyyy-mm-dd、中文完整年月日、英文完整/缩写月份日期及单个 24 小时
-HH:MM。无年份、暂定/否定、多个日期或时刻、复杂表格布局、AM/PM/外部时区等需要
-review；文档所在页有 tentative/draft 等标记时同样不会自动确认。
-Week 7 Friday 等在 ingestion 时保留为 unresolved；查询时若 Canvas Calendar Events
-或课程官方 ICS 日历提供明确 Week 标签，或唯一首次上课锚点及 Recess Week 记录，引擎会生成单独的
-reference_deadlines 参考日期范围。该范围不进入确认 count，也不依赖外部 academic
-calendar。ICS 仅接受同源 Canvas 课程 feed、请求不携带 API token、URL 不写入结果。
-扫描版或
-文字层不足的页面在 ingestion 时使用本地 PP-OCRv6 Small；普通文字 PDF 不启动 OCR。
-OCR 只提供带页码与置信度的文字，仍须经过同一个 Codex 语义审核和独立 validator。
-低于阈值的日期保留为 unresolved；依赖、模型或推理失败会标记覆盖不完整。
+当 `semantic_review_required=true` 时，`$canvas-ddl` 分批获取 engine-issued chunk，提交严格
+`codex-semantic-v2` JSON，再重跑原查询。审核完成前，该文档的 deadline 被扣留，结果为
+partial。最终查询只读持久化证据，不在每次查询时重新打开 PDF。扫描页仅在新文件或变更
+文件 ingestion 时调用本地 PP-OCRv6 Small；普通文字页不启动 OCR。Week 7 Friday 等相对教学
+周仍由 Canvas Calendar Events/课程 ICS 的确定性 resolver 处理，不由 Codex 猜日期。
 
 ## 查询结果与冲突
 
@@ -230,7 +188,7 @@ python -m pytest -q
 
 默认测试为离线模拟数据与生成的 PDF，不需要真实 token。
 [PRD](docs/PRD_DDL_ONLY.md)、[Architecture](docs/ARCHITECTURE.md)、
-[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.11。
+[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.12。
 本地验证记录可能包含私有课程信息，因此不提交到公开仓库。
 
 PDF parser 依据 [pypdf 官方文档](https://pypdf.readthedocs.io/en/stable/user/extract-text.html)；
@@ -250,14 +208,13 @@ OCR 依据 [PaddleOCR 官方安装说明](https://www.paddleocr.ai/main/en/versi
 默认限制不适用于自动考试查询。Files 禁止访问时尝试 Modules 文件链接，并标为部分
 覆盖；访问、下载、解析及空白页失败均保留，不声称已经成功读完所有文件。
 
-新的 PDF、DOCX、PPTX、XLSX、CSV、文本、RTF、HTML 和图片可以先解析并保存原文、
-格式对应的位置、候选及验证审核到独立的
-`data/documents.pending.sqlite3`；官方性和课程期间未批准前仍是未确认参考，
-不能进入 canonical deadline 或考试计数。已批准来源继续使用原事实库和冲突规则。
+认证 Canvas API 返回的新 PDF、DOCX、PPTX、XLSX、CSV、文本、RTF、HTML 和图片会
+自动登记并进入主 ingestion pipeline。只有外部/手工来源在 operator trust 前进入
+`data/documents.pending.sqlite3`，只能作为未确认参考，不能进入 canonical deadline 或考试计数。
 相同 metadata/hash 复用已解析内容，新版本按授权更新，最终查询只读取持久化证据。
 
 结果中的 document_content_matches 来自引擎对全部已保存文档单元的考试关键词及上下文检索，
 覆盖跨行安排。每份文档最多返回10段、每段1500字符并显示截断信息；关键词匹配
 不是考试数量，统计学的 test、举例中的 exam 也不是考试安排。Skill 只呈现相关
-引擎证据及风险，不自行读取源文档、批准来源或将原文变成最终日期事实。
+引擎证据及风险，不自行读取源文档、决定来源或将原文变成最终日期事实。
 PDF 解析支持能以空用户密码正常打开的 AES 文件；需要实际密码的文件仍安全失败。

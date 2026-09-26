@@ -1,29 +1,30 @@
 # PRD — Multi-source Canvas DDL Assistant
 
-**Status:** Implemented contract v0.11 · 2026-09-26
+**Status:** Implemented contract v0.12 · 2026-09-26
 **Deployment:** single-user, local, read-only Canvas PAT  
 **Interface:** Codex Skill / CLI; MCP optional and deferred
 
 ## Course-scoped automated preparation
 
-Explicit maintenance `prepare-documents --course <reference>` may use the existing
-Canvas .env to list course files and download up to 20 filename-hinted supported document candidates.
-Course metadata, canonical source links and SHA-256 are filled automatically in
-pending-review.json, with active=false and no approver/teaching period. Names are
-discovery hints, never authority. Query fallback may check the selected courses'
-library through the engine; it never performs full-account synchronization. No-match/access failures do not establish
-document coverage. A subsequent explicit operator `approve-document` confirms the
-reviewed source/type/period, validates the proposed registry, then runs ingestion.
-Codex cannot manufacture approval or silently guess the course period. Explicitly
-authorized use of official term/calendar evidence may establish the period with an
-audit trail. Canvas storage hosts
-are transport destinations only, never evidence authority; auth stays on-origin.
+Authenticated Canvas Files, Syllabus and published Pages are course-scoped evidence
+sources. The engine verifies Canvas origin, course path, resource ID and content hash,
+then registers them automatically with `source_authority=canvas_api`; human source
+approval and a manually entered teaching period are not required. Explicit
+`prepare-documents --course <reference>` may download up to 20 filename-hinted files,
+while automatic exam refresh scans every accessible supported document without that
+name/count limit. No-match, inventory fallback and access/parse failures remain visible
+and cannot establish complete coverage.
+
+External URLs and manually supplied local files remain a separate operator trust path.
+Only that path uses pending-review plus `approve-document` with a real approver, verified
+course/type and teaching period. Codex cannot manufacture approval. Canvas storage/CDN
+hosts are transport destinations only; authentication stays on the Canvas origin and an
+arbitrary download URL cannot claim `canvas_api` authority.
 
 ## Product goal
 
 Answer upcoming academic deadline questions using an explicit, auditable evidence
-base. Canvas structured data and **approved official course documents** jointly
-provide evidence. A verified document-only deadline is valid without a Canvas record.
+base. Canvas structured data and **trusted course documents** jointly provide evidence. A verified document-only deadline is valid without a Canvas record.
 The system is a deadline engine, not a course tutor or general document chatbot.
 
 Priority: correct range/course → evidence → validation → reconciliation →
@@ -39,11 +40,11 @@ deduplication → filtering → count/timezone → provenance → concise presen
   Calendar Events is empty or incomplete. This uses the course's own start/Week
   labels and recess records; it does not require or consult an external academic
   calendar or unscoped personal calendar.
-- Pre-ingested, explicitly approved official course documents tied to a course and
-  approved teaching period: PDF, DOCX, PPTX, XLSX, CSV, TXT/Markdown, RTF, HTML and
-  standalone PNG/JPEG/WebP/TIFF/BMP images. Canvas Syllabus and published course
-  Pages are discovered as official course-content candidates and pass through the
-  same pending-review and ingestion pipeline.
+- Pre-ingested course documents: authenticated course-scoped Canvas Files, Syllabus
+  and published Pages are trusted automatically after exact API identity checks;
+  external/manual official documents require operator trust and an approved teaching
+  period. Supported artifacts are PDF, DOCX, PPTX, XLSX, CSV, TXT/Markdown, RTF, HTML
+  and standalone PNG/JPEG/WebP/TIFF/BMP images.
 - Date-only schedules, precise deadlines, submission status when Canvas supplies
   it, source conflicts and validation diagnostics.
 
@@ -54,42 +55,39 @@ submission, full-account synchronization, notifications, OAuth and multi-user ho
 
 ## Authority and validation
 
-Officiality is established by an **operator-maintained document registry**, not
-by filename, document self-description, LLM confidence or Codex reasoning. The registry
-records approved course ID/code/name, document kind/name, source URL on a permitted
-official host, SHA-256 content hash, approver, local immutable artifact and validity period.
-This is a local trust configuration boundary: the operator must verify the
-official source and course/period before approving it. A matching URL alone is
-not cryptographic proof of origin. Codex must not self-approve a source or invent
-an approver. Extraction cannot modify the registry or its authority.
+Source authority has two explicit paths. `canvas_api` means the file/content identity was
+returned by an authenticated Canvas request for the selected course and matched the exact
+Canvas origin, course path and resource ID. This path needs no human source approval.
+`operator` means a maintainer verified an external/manual official document, its course,
+kind, SHA-256 and teaching period. Filename, document self-description, LLM confidence,
+Codex reasoning and arbitrary URLs grant no authority. Extraction cannot modify these
+trust decisions.
 
-Ingestion is a distinct stage before the final document evidence query. A format
-dispatcher selects the bounded PDF, DOCX, PPTX, XLSX, CSV, text, RTF, HTML or image
-parser. PDF pages and standalone/embedded presentation images may use local
-PP-OCRv6 Small when native text is insufficient:
+Ingestion is distinct from the final evidence query. A bounded format parser handles PDF,
+DOCX, PPTX, XLSX, CSV, text, RTF, HTML or image input; local PP-OCRv6 Small is used only
+for low-text PDF pages and eligible images.
 
 ```text
-approved registry → DocumentParser → StructuralChunker → broad temporal-anchor prefilter
-→ bounded Codex semantic review
-                  → SemanticDeadlineCandidate → DeadlineValidator
-                  → persisted review/validation evidence → confirmed normalized Deadline
+Canvas API scoped identity or operator trust
+→ DocumentParser → StructuralChunker → broad temporal-anchor prefilter
+→ bounded Codex semantic review (codex-semantic-v2)
+→ SemanticDeadlineCandidate → DeadlineValidator
+→ persisted review/validation evidence → confirmed normalized Deadline
 ```
 
-The runtime extractor is a two-stage Codex Skill protocol. Python creates bounded
-structural chunks without deciding whether a keyword is a deadline. Codex returns
-strict `codex-semantic-v1` reviews with exact title/evidence/date substrings and may
-emit several logical events from one chunk. Python independently verifies document,
-course, content hash, source location, exact evidence/date anchors, legal literal
-date/time, approved period, OCR threshold and allowed enums. Codex cannot approve a
-source, invent missing dates, choose source priority or count. Incomplete review
-withholds that document's deadline facts. `confirmed`, `unresolved`, `rejected` remain distinct.
+Codex returns one event per logical schedule with exact source title, evidence and
+`date_expression`, plus `normalized_date` (`YYYY-MM-DD` or null) and `normalized_time`
+(`HH:MM` or null). It may resolve numeric order, ordinal dates and AM/PM from semantics.
+Python independently verifies that the normalized result is a literal-compatible reading,
+that a missing year has one unambiguous full-document context year, and that source
+authority, course, hash, location, role, enum and OCR thresholds hold. This removes the
+former “one regex date only” restriction without making LLM output a fact. Codex cannot
+decide trust, priority, deduplication or count. Incomplete review withholds that document.
 
-Every document-derived deadline preserves document ID/name/hash, original source
-URL, format-specific location (page, slide, paragraph, table row, sheet row, text
-line, HTML block or image), original evidence text, ingestion timestamp and
-validation status, checks, time and rule version. The final evidence query does not
-open or parse original documents;
-only a preceding update stage can ingest a changed/missing artifact.
+Every document deadline preserves document ID/name/hash, authority, original URL,
+format-specific location, exact evidence/date expression, normalized value, ingestion time
+and validation audit. Final queries use persisted evidence and do not reopen source files;
+only the update stage parses new or changed artifacts.
 
 ## Exhaustive scoped course-document checks for exams
 
@@ -106,19 +104,17 @@ supported modern document by MIME or extension regardless of filename. There is 
 default 20-file limit.
 An explicit limit reports unprocessed coverage. On unavailable/forbidden Files,
 Modules file items may supply accessible documents; this fallback is always partial and
-never proves complete course inventory. Access, parse and empty-page failures remain
-visible. New documents and Canvas Syllabus/Page HTML are content-scanned into an
-isolated provisional store, retaining source units/locations, original text,
-candidates and independent validation audit.
-Source/period approval is required before any proposal can become a Deadline.
-Provisional `DocumentDraft` period bounds are syntax-only placeholders, not authority.
+never proves complete course inventory. Access, parse and empty-page failures remain visible. New authenticated Canvas
+Files/Syllabus/Pages register automatically and enter the main evidence pipeline. External
+or manual documents may be content-scanned into an isolated provisional store, but require
+operator trust before any proposal can become a Deadline. Provisional `DocumentDraft`
+period bounds are syntax-only placeholders, not authority.
 
-The update stage uses DocumentParser → StructuralChunker → LightSemanticPrefilter → Codex semantic review →
-DeadlineCandidate → DeadlineValidator before the final query. A legacy rule extractor may
-produce provisional diagnostics during migration, but its output is withheld from runtime
-document facts until the hash-bound Codex review is complete. Existing approved sources use the approved
-store; unapproved scans use `data/documents.pending.sqlite3` (derived from the configured
-store path). Their candidates remain unresolved/rejected even if literal dates parse.
+The update stage uses DocumentParser → StructuralChunker → LightSemanticPrefilter → Codex
+semantic review → DeadlineCandidate → DeadlineValidator before the final query. A legacy
+rule extractor may produce migration diagnostics, but runtime facts are withheld until the
+hash-bound Codex review is complete. Trusted records use the main store; provisional
+external/manual scans use `data/documents.pending.sqlite3`.
 Pending proposals and raw text excerpts never enter canonical counts. The engine also
 searches all persisted page text for academic keywords and returns bounded context as
 `document_content_matches`, including multi-line evidence that extraction may miss.
@@ -128,19 +124,19 @@ Adapters may quote relevant reference text with its source/page and explicit ris
 without asserting source officiality, inferring dates or computing exam counts.
 
 Unchanged metadata/hash with valid artifacts reuses stored content without parsing.
-Changed/missing metadata triggers a hash comparison. An approved exact Canvas file
-with operator-authorized auto_refresh=true may update its hash/path/history while
-preserving course/type/period/human approval. New IDs cannot inherit approval by name.
-Unauthorized changed versions stay pending and block old facts. Complete inventory
+Changed/missing metadata triggers a hash comparison. An authenticated Canvas resource
+updates its hash/path/history automatically; a new Canvas ID is accepted only after a fresh
+course-scoped API identity check. External/manual source IDs and versions cannot inherit
+operator trust by filename. Failed current versions block old facts. Complete inventory
 absence and known update failures also block old facts; unknown state under access
-failure remains partial. Module-only inventory must not mark unseen approved files
+failure remains partial. Module-only inventory must not mark unseen trusted files
 as deleted. `file_library_check` exposes scope=all_course_documents, coverage, actions,
 warnings and check time separately from ingestion/validation timestamps.
 
 ## Multi-source canonical deadlines
 
 ```text
-live Canvas + persisted validated official document evidence
+live Canvas + persisted validated trusted document evidence
 → normalize → classify → validate → reconcile → deduplicate
 → filter → sort → limit → count → structured JSON → Codex presentation
 ```
@@ -174,7 +170,7 @@ logical deadline from inflating count. Reconciliation is not moved into the Skil
   explicit aware ISO timestamps, human-readable course reference or verified course IDs,
   type/status filters, optional limit and document_mode=auto/existing/refresh.
 - `upcoming(days=7, ...)`, `list_courses(course_reference=None)`, `get_deadline(id)`.
-- `ingest_document(document_id)` parses an approved registry record and stages semantic review;
+- `ingest_document(document_id)` parses a trusted registry record and stages semantic review;
   `semantic_review_requests(document_id)` returns bounded untrusted chunks and
   `apply_semantic_review(document_id, payload)` validates/persists Codex review batches;
   `list_documents()` exposes inventory/validation/ingestion diagnostics.
@@ -218,10 +214,9 @@ A mapped relative week becomes a `ReferenceDeadline`, not a canonical `Deadline`
 `Week 7 Friday` has day precision, while bare `Week 7` has a Monday–Sunday window.
 It is filtered against the requested range/type and appears in the separate
 high-recall reference list. It never enters canonical count, because the document
-still does not state an exact factual timestamp. Approved official documents may
-produce medium/high-confidence references; provisional Canvas course documents may
-produce low-confidence references with source approval risk preserved.
-Missing-year inference, guessed AM/PM, tentative/cancelled wording, unlock/lock
+still does not state an exact factual timestamp. Trusted Canvas/API or operator documents may produce medium/high-confidence references;
+provisional external/manual documents may produce low-confidence references with trust risk preserved.
+An ungrounded missing-year or AM/PM mapping, tentative/cancelled wording, unlock/lock
 conversion or best-effort presentation cannot promote a candidate to a confirmed fact.
 For this user's low-risk reference preference, adapters may quote clear official
 month/day candidates as unconfirmed reference arrangements with location/source and
@@ -239,7 +234,9 @@ the failure or aborting unrelated readable pages.
 
 Deadline retains its original fields plus multiple `SourceReference` values,
 `validation`, `conflicts`, `reconciliation_status`, `canonical_reason` and
-date-only semantics. Document deadlines have `canvas_resource_id=null`.
+date-only semantics. Document SourceReference exposes `source_authority` so callers
+can distinguish authenticated Canvas identity from operator trust. Document deadlines
+have `canvas_resource_id=null`.
 
 ```text
 result.count == len(result.deadlines)
@@ -262,7 +259,7 @@ inventory; it does not prove that every course document has been registered.
 
 Freshness: `live`, `live_partial`, `live_with_ingested_documents`, `mixed_partial`.
 Document ingestion/validation times never become pretend live-document verification
-times. Missing approved ingestion, hash/version mismatch, unresolved candidates,
+times. Missing trusted ingestion, hash/version mismatch, unresolved candidates,
 empty pages, unavailable sources and unresolved reconciliation make results partial.
 Partial zero does not prove absence. Document facts may be shown as ingested evidence
 when Canvas collection fails, with partial status; no stale Canvas fallback exists.
@@ -272,7 +269,7 @@ when Canvas collection fails, with partial status; no stale Canvas fallback exis
 
 CANVAS_TOKEN (or CANVAS_API_TOKEN compatibility alias) stays local. Never print,
 log or include it/auth headers in model-facing data. Canvas performs GET only;
-local ingestion writes only its evidence store. Official host approval never
+local ingestion writes only its evidence store. Allowlisting a document download host never
 exposes an arbitrary authenticated HTTP capability to Codex.
 
 Keep sufficient-evidence queries lightweight; unchanged files must not be reparsed.
@@ -291,14 +288,14 @@ Additionally verify:
 4. Reconciliation before filtering prevents moved dates from leaving obsolete document hits.
 5. Ambiguous, relative-week, missing-year, forged location/text/scope/date proposals
    cannot become confirmed facts. Fabricated Codex spans/dates and incomplete review are rejected/withheld.
-6. Approved document hash/version/course binding and re-ingestion are enforced.
+6. Canvas API origin/course/resource binding and operator document hash/period binding are enforced.
 7. Existing evidence queries continue without original documents or parsing. Unchanged
    refresh checks also reuse persisted evidence without parsing.
 8. Source failures, unresolved conflicts, date-only precision, count invariants,
    secrets and Canvas read-only behavior are covered by offline tests.
 9. Complete positive non-exam queries skip files; exam queries always check all scoped supported documents and Canvas course content. Empty/partial queries refresh before
    counting; forced/existing modes and explicit course scope are tested.
-10. New-source review, same-file authorized versions, unchanged/hash-identical
+10. Canvas automatic registration/versioning, external-source review, unchanged/hash-identical
     files, disappearance, update/permission failures and recovery preserve counts.
 11. Scanned PDF deadlines pass through PP-OCRv6 Small and deterministic validation;
     low-confidence OCR remains unresolved, native-text pages bypass OCR, and OCR
@@ -311,14 +308,15 @@ Additionally verify:
     unexpected feed URLs are rejected.
 13. DOCX, PPTX, XLSX, CSV, TXT/Markdown, RTF, HTML and standalone image inputs pass
     through the same chunk/prefilter/Codex-review/validator pipeline, preserve format-specific
-    locations, and do not reopen the source during final queries. Canvas Syllabus and
-    published Pages are discovered and scanned as provisional HTML; approval remains
-    mandatory before confirmed facts.
+    locations, and do not reopen the source during final queries. Canvas Syllabus and published Pages are discovered, automatically trusted through
+    their authenticated course scope, and ingested as HTML without human source approval.
 14. A deadline without a legacy keyword is found through Codex semantic review;
     statistical `test` text yields an audited negative review; one chunk can bind
     multiple dates to distinct events without Python's former exactly-one-date rule.
 15. Final queries rebuild the exact candidate set from persisted strict reviews;
     missing, extra or altered review/candidate rows withhold that document's facts.
+16. `02/10/26`, ordinal month dates and AM/PM normalize through Codex v2 and are
+    independently grounded by Python; impossible/fabricated mappings remain non-canonical.
 
 
 ## Grading-based midterm reference inference

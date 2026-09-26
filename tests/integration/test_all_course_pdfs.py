@@ -20,27 +20,23 @@ def rename(remote, name, *, mime=None):
     remote.get_paginated = listing
 
 
-def test_unhinted_lecture_pdf_content_is_scanned_and_returned_as_unconfirmed(tmp_path):
+def test_unhinted_canvas_pdf_is_registered_ingested_and_queryable(tmp_path):
     service, remote, registry, _ = setup(tmp_path, registered=False)
     rename(remote, "COURSE101_Introduction.pdf")
     result = query(service)
     report = result["file_library_check"]
     assert report["coverage"][0]["listed_pdf_count"] == report["coverage"][0]["processed_pdf_count"] == 1
-    assert report["actions"][0]["scan"]["pages"] == 1
+    assert report["actions"][0]["ingestion"]["pages"] == 1
     summary = result["document_summary"][0]
-    candidate = summary["candidate_issues"][0]
-    assert summary["source_verified"] is False and candidate["status"] == "unresolved"
-    assert candidate["evidence_text"] == "Midterm Exam: 2026-09-23 14:00"
-    assert candidate["proposed_value_at"].startswith("2026-09-23T14:00")
-    assert "SOURCE_APPROVAL_REQUIRED" in candidate["reasons"]
-    assert result["count"] == 0 and registry.list_documents() == ()
+    assert summary["source_verified"] is True and summary["confirmed"] == 1
+    assert result["count"] == 1 and registry.list_documents()[0].source_authority == "canvas_api"
     match = result["document_content_matches"][0]
-    assert match["source_verified"] is False and match["unvalidated_excerpts"]
+    assert match["source_verified"] is True and match["unvalidated_excerpts"]
     assert "Midterm Exam" in match["matches"][0]["evidence_text"]
 
 
 @pytest.mark.parametrize("password,readable", [("", True), ("required-user-password", False)])
-def test_encrypted_pdf_readability_does_not_bypass_approval(tmp_path, password, readable):
+def test_encrypted_canvas_pdf_requires_readability_not_separate_approval(tmp_path, password, readable):
     from io import BytesIO
     from pypdf import PdfReader, PdfWriter
     service, remote, registry, _ = setup(tmp_path, registered=False)
@@ -51,11 +47,13 @@ def test_encrypted_pdf_readability_does_not_bypass_approval(tmp_path, password, 
     writer.write(out)
     remote.content = out.getvalue()
     result = query(service)
-    assert result["count"] == 0 and registry.list_documents() == ()
+    assert len(registry.list_documents()) == 1
     if readable:
-        assert result["file_library_check"]["actions"][0]["scan"]["pages"] == 1
-        assert result["document_summary"][0]["source_verified"] is False
+        assert result["count"] == 1
+        assert result["file_library_check"]["actions"][0]["ingestion"]["pages"] == 1
+        assert result["document_summary"][0]["source_verified"] is True
     else:
+        assert result["count"] == 0
         assert any("DOCUMENT_PARSE_FAILED" in warning for warning in result["warnings"])
 
 
@@ -71,9 +69,9 @@ def test_layout_failure_uses_audited_plain_text_and_suppresses_library_diagnosti
         return original(page, *args, **kwargs)
     monkeypatch.setattr(PageObject, "extract_text", extract)
     result = query(service)
-    assert result["file_library_check"]["actions"][0]["scan"]["plain_fallback_pages"] == [1]
+    assert result["file_library_check"]["actions"][0]["ingestion"]["plain_fallback_pages"] == [1]
     assert result["document_content_matches"][0]["matches"][0]["extraction_mode"] == "plain"
-    assert result["count"] == 0 and registry.list_documents() == ()
+    assert result["count"] == 1 and registry.list_documents()[0].source_authority == "canvas_api"
     assert "unsafe-library-diagnostic" not in capsys.readouterr().err
 
 
@@ -102,7 +100,7 @@ def test_default_scan_does_not_stop_at_twenty_pdfs(tmp_path):
     assert report["coverage"][0]["listed_pdf_count"] == 26
     assert report["coverage"][0]["unprocessed_pdf_count"] == 0
     assert len(report["actions"]) == len(result["document_summary"]) == remote.downloads == 26
-    assert all(a["scan"]["confirmed"] == 0 for a in report["actions"])
+    assert all(a["ingestion"]["confirmed"] == 1 for a in report["actions"])
 
 
 def test_mime_detects_pdf_without_filename_extension(tmp_path):
@@ -110,42 +108,39 @@ def test_mime_detects_pdf_without_filename_extension(tmp_path):
     rename(remote, "Course Information", mime="application/pdf")
     result = query(service)
     assert result["file_library_check"]["coverage"][0]["listed_pdf_count"] == 1
-    assert result["document_summary"][0]["candidate_issues"]
+    assert result["document_summary"][0]["confirmed"] == 1
 
 
-def test_unchanged_provisional_pdf_reuses_parsed_artifact(tmp_path, monkeypatch):
+def test_unchanged_canvas_pdf_reuses_parsed_artifact(tmp_path, monkeypatch):
     service, remote, _, _ = setup(tmp_path, registered=False)
     query(service)
     monkeypatch.setattr(service.document_ingestion.parser, "parse", lambda *a, **k: pytest.fail("Reparsed unchanged provisional PDF"))
     result = query(service)
-    assert remote.downloads == 1 and result["file_library_check"]["actions"][0]["scan"]["state"] == "reused"
-    assert result["document_summary"][0]["candidate_issues"][0]["status"] == "unresolved"
+    assert remote.downloads == 1 and result["file_library_check"]["actions"][0]["state"] == "unchanged"
+    assert result["document_summary"][0]["confirmed"] == 1
 
 
-def test_changed_provisional_pdf_replaces_old_text(tmp_path):
+def test_changed_canvas_pdf_replaces_old_deadline(tmp_path):
     service, remote, _, _ = setup(tmp_path, registered=False)
     query(service)
     remote.content, remote.version = pdf(25), "v2"
     result = query(service)
-    evidence = result["document_summary"][0]["candidate_issues"][0]["evidence_text"]
-    assert "2026-09-25" in evidence and "2026-09-23" not in evidence
-    assert result["count"] == 0
+    assert result["count"] == 1
+    assert result["deadlines"][0]["start_at"].startswith("2026-09-25")
 
 
-def test_pending_scan_confirmed_flag_cannot_promote_facts(tmp_path):
+def test_stored_canvas_validation_flag_cannot_override_revalidation(tmp_path):
     service, remote, registry, _ = setup(tmp_path, registered=False)
     query(service)
-    path = service.document_ingestion.scanner.repository.path
+    path = service.document_ingestion.repository.path
     with sqlite3.connect(path) as db:
         cid, raw = db.execute("SELECT candidate_id,validation_json FROM candidates").fetchone()
         value = json.loads(raw)
-        value["status"] = "confirmed"
+        value["status"] = "rejected"
         db.execute("UPDATE candidates SET validation_json=? WHERE candidate_id=?", (json.dumps(value), cid))
     result = query(service)
-    assert result["count"] == 0 and result["document_summary"][0]["confirmed"] == 0
-    assert result["document_summary"][0]["candidate_issues"][0]["status"] == "unresolved"
-    assert registry.list_documents() == ()
-    assert not service.document_ingestion.repository.path.exists()  # Fact DB untouched.
+    assert result["count"] == 1 and result["document_summary"][0]["confirmed"] == 1
+    assert registry.list_documents()[0].source_authority == "canvas_api"
 
 
 def test_forged_extraction_is_rejected_in_provisional_scan(tmp_path):
@@ -158,12 +153,12 @@ def test_forged_extraction_is_rejected_in_provisional_scan(tmp_path):
     assert result["count"] == 0
 
 
-def test_removed_pending_pdf_never_reappears_as_current_reference(tmp_path):
+def test_removed_canvas_pdf_withholds_previous_fact(tmp_path):
     service, remote, _, _ = setup(tmp_path, registered=False)
     query(service)
     remote.missing = True
     result = query(service)
-    assert result["document_summary"][0]["state"] == "missing"
+    assert result["document_summary"][0]["state"] == "remote_version_unavailable"
     assert result["document_summary"][0]["candidate_issues"] == []
 
 
@@ -210,8 +205,8 @@ def test_octet_stream_pdf_is_not_removed_by_remote_mime_filter():
     assert len(files) == 1 and files[0]["id"] == 1 and not warnings
 
 
-def test_unconfirmed_pdf_evidence_survives_total_canvas_collector_failure(tmp_path):
+def test_canvas_document_fact_survives_structured_collector_failure(tmp_path):
     service, remote, registry, _ = setup(tmp_path, registered=False, error="SOURCE_UNAVAILABLE")
     result = query(service)
-    assert result["status"] == "partial" and result["count"] == 0
-    assert result["document_content_matches"][0]["matches"] and registry.list_documents() == ()
+    assert result["status"] == "partial" and result["count"] == 1
+    assert result["document_content_matches"][0]["matches"] and registry.list_documents()[0].source_authority == "canvas_api"

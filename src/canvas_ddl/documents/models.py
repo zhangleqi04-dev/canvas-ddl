@@ -19,6 +19,7 @@ class OfficialDocument:
     valid_until: date
     auto_refresh: bool = False
     refresh_blocked: bool = False
+    source_authority: str = "operator"
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,8 @@ class DeadlineCandidate:
     semantic_status: str | None = None
     review_id: str | None = None
     semantic_reason: str | None = None
+    normalized_date: str | None = None
+    normalized_time: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,7 +82,7 @@ class CandidateValidation:
     status: str
     reasons: tuple[str, ...]
     validated_at: datetime
-    rule_version: str = "document-validator-v3"
+    rule_version: str = "document-validator-v4"
     value_at: datetime | None = None
     value_kind: str | None = None
     date_only: bool = False
@@ -97,3 +100,4 @@ class RelativeWeekEvidence:
     ocr_engine: str | None
     ocr_confidence: float | None
     source_verified: bool
+    source_authority: str | None = None

@@ -30,6 +30,7 @@ class SourceReference:
     ocr_engine: str | None = None
     ocr_confidence: float | None = None
     location: str | None = None
+    source_authority: str | None = None
 
 
 @dataclass(frozen=True)

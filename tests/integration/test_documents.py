@@ -15,6 +15,7 @@ from canvas_ddl.documents.extractor import DeadlineExtractor
 from canvas_ddl.documents.models import DeadlineCandidate
 from canvas_ddl.documents.ocr import OcrPageResult, OcrUnavailable
 from canvas_ddl.documents.parser import DocumentParser
+from canvas_ddl.documents.semantic import SCHEMA_VERSION
 from canvas_ddl.deadlines.query import DeadlineQuery
 from canvas_ddl.deadlines.time_intent import TimeIntent
 from canvas_ddl.deadlines.service import DeadlineService
@@ -562,8 +563,31 @@ def test_wrong_canvas_course_url_and_nonhuman_approval_not_trusted(tmp_path):
             ingestion.registry.list_documents()
 
 
+def test_canvas_api_authority_requires_exact_authenticated_course_resource(tmp_path):
+    ingestion, _ = setup_documents(tmp_path, ["Midterm Exam: 2026-09-23"])
+    path = ingestion.registry.path
+    trusted = json.loads(path.read_text())
+    row = trusted["documents"][0]
+    row.update(document_id="canvas-12345-99", source_authority="canvas_api", approved_by="",
+               source_url="https://canvas.example/courses/12345/files/99")
+    path.write_text(json.dumps(trusted))
+    assert ingestion.registry.list_documents()[0].source_authority == "canvas_api"
+
+    for change in [
+        {"source_url": "https://files.example/courses/12345/files/99"},
+        {"source_url": "https://canvas.example/courses/999/files/99"},
+        {"document_id": "canvas-12345-100"},
+        {"approved_by": "fixture-human"},
+    ]:
+        content = json.loads(json.dumps(trusted))
+        content["documents"][0].update(change)
+        path.write_text(json.dumps(content))
+        with pytest.raises(ApplicationError):
+            ingestion.registry.list_documents()
+
+
 def semantic_payload(batch, reviews):
-    return {"schema_version": "codex-semantic-v1", "document_id": batch["document_id"],
+    return {"schema_version": SCHEMA_VERSION, "document_id": batch["document_id"],
             "document_sha256": batch["document_sha256"], "reviews": reviews}
 
 
@@ -575,7 +599,8 @@ def test_codex_semantic_review_finds_deadline_without_legacy_keyword(tmp_path):
     request = batch["requests"][0]
     review = {"request_id": request["request_id"], "reason_code": "submission_deadline", "events": [{
         "title": "Milestone submission", "type": "assignment", "semantic_status": "scheduled",
-        "date_expression": "2026-09-23", "value_kind": "due_at",
+        "date_expression": "2026-09-23", "normalized_date": "2026-09-23",
+        "normalized_time": "14:00", "value_kind": "due_at",
         "evidence_text": "Milestone submission: 2026-09-23 14:00",
     }]}
     result = ingestion.apply_semantic_review("outline", COURSE, semantic_payload(batch, [review]))
@@ -608,10 +633,12 @@ def test_codex_semantic_review_binds_two_dates_in_one_chunk(tmp_path):
     request_id = batch["requests"][0]["request_id"]
     events = [
         {"title": "Midterm Exam", "type": "exam", "semantic_status": "scheduled",
-         "date_expression": "2026-09-23", "value_kind": "start_at",
+         "date_expression": "2026-09-23", "normalized_date": "2026-09-23",
+         "normalized_time": "14:00", "value_kind": "start_at",
          "evidence_text": "Midterm Exam: 2026-09-23 14:00"},
         {"title": "Final Exam", "type": "exam", "semantic_status": "scheduled",
-         "date_expression": "2026-11-30", "value_kind": "start_at",
+         "date_expression": "2026-11-30", "normalized_date": "2026-11-30",
+         "normalized_time": "09:00", "value_kind": "start_at",
          "evidence_text": "Final Exam: 2026-11-30 09:00"},
     ]
     review = {"request_id": request_id, "reason_code": "scheduled_assessment", "events": events}
@@ -644,7 +671,8 @@ def test_codex_semantic_review_rejects_unanchored_date(tmp_path):
     request_id = batch["requests"][0]["request_id"]
     review = {"request_id": request_id, "reason_code": "scheduled_assessment", "events": [{
         "title": "Midterm Exam", "type": "exam", "semantic_status": "scheduled",
-        "date_expression": "2026-10-01", "value_kind": "start_at",
+        "date_expression": "2026-10-01", "normalized_date": "2026-10-01",
+        "normalized_time": None, "value_kind": "start_at",
         "evidence_text": "Midterm Exam: 2026-09-23",
     }]}
     with pytest.raises(ApplicationError) as error:
@@ -662,14 +690,15 @@ def test_relative_week_evidence_cannot_bypass_codex_semantic_review(tmp_path):
     request_id = batch["requests"][0]["request_id"]
     review = {"request_id": request_id, "reason_code": "scheduled_assessment", "events": [{
         "title": "Midterm Exam", "type": "exam", "semantic_status": "scheduled",
-        "date_expression": "Week 7 Friday", "value_kind": "start_at",
+        "date_expression": "Week 7 Friday", "normalized_date": None,
+        "normalized_time": None, "value_kind": "start_at",
         "evidence_text": "Midterm Exam: Week 7 Friday",
     }]}
     applied = ingestion.apply_semantic_review("outline", COURSE, semantic_payload(batch, [review]))
     assert applied["complete"] and applied["unresolved"] == 1
     evidence = ingestion.load_relative_week_evidence((COURSE,))
     assert len(evidence) == 1
-    assert evidence[0].candidate.extractor == "codex-semantic-v1"
+    assert evidence[0].candidate.extractor == SCHEMA_VERSION
     assert evidence[0].validation.reasons == ("CANVAS_TEACHING_WEEK_REQUIRED",)
 
 
@@ -681,7 +710,8 @@ def test_persisted_semantic_review_must_rebuild_exact_candidate_set(tmp_path):
     request_id = batch["requests"][0]["request_id"]
     review = {"request_id": request_id, "reason_code": "submission_deadline", "events": [{
         "title": "Milestone submission", "type": "assignment", "semantic_status": "scheduled",
-        "date_expression": "2026-09-23", "value_kind": "due_at",
+        "date_expression": "2026-09-23", "normalized_date": "2026-09-23",
+        "normalized_time": None, "value_kind": "due_at",
         "evidence_text": "Milestone submission: 2026-09-23",
     }]}
     ingestion.apply_semantic_review("outline", COURSE, semantic_payload(batch, [review]))
@@ -692,3 +722,62 @@ def test_persisted_semantic_review_must_rebuild_exact_candidate_set(tmp_path):
     assert data["document_summary"][0]["candidate_issues"][0]["reasons"] == [
         "INVALID_PERSISTED_SEMANTIC_REVIEW"
     ]
+
+
+def test_codex_normalized_numeric_date_is_verified_and_canonical(tmp_path):
+    line = "7 | 02/10/26 | Nonlinear Programming Midterm Exam"
+    ingestion, _ = setup_documents(tmp_path, [line])
+    ingestion.require_semantic_review = True
+    ingestion.ingest("outline", COURSE)
+    batch = ingestion.semantic_review_requests("outline", COURSE)
+    review = {"request_id": batch["requests"][0]["request_id"],
+              "reason_code": "scheduled_assessment", "events": [{
+        "title": "Nonlinear Programming Midterm Exam", "type": "exam",
+        "semantic_status": "scheduled", "date_expression": "02/10/26",
+        "normalized_date": "2026-10-02", "normalized_time": None,
+        "value_kind": "start_at", "evidence_text": line,
+    }]}
+    result = ingestion.apply_semantic_review("outline", COURSE, semantic_payload(batch, [review]))
+    assert result["confirmed"] == 1
+    data = query(service(ingestion), TimeIntent("date_range", "2026-10-02",
+                 start_date="2026-10-02", end_date="2026-10-02"), types=("exam",))
+    assert data["count"] == 1
+    assert data["deadlines"][0]["start_at"] == "2026-10-02T00:00:00+08:00"
+
+
+def test_codex_normalized_date_must_be_a_possible_literal_reading(tmp_path):
+    line = "Nonlinear Programming Midterm Exam: 02/10/26"
+    ingestion, _ = setup_documents(tmp_path, [line])
+    ingestion.require_semantic_review = True
+    ingestion.ingest("outline", COURSE)
+    batch = ingestion.semantic_review_requests("outline", COURSE)
+    review = {"request_id": batch["requests"][0]["request_id"],
+              "reason_code": "scheduled_assessment", "events": [{
+        "title": "Nonlinear Programming Midterm Exam", "type": "exam",
+        "semantic_status": "scheduled", "date_expression": "02/10/26",
+        "normalized_date": "2026-10-03", "normalized_time": None,
+        "value_kind": "start_at", "evidence_text": line,
+    }]}
+    result = ingestion.apply_semantic_review("outline", COURSE, semantic_payload(batch, [review]))
+    assert result["confirmed"] == 0 and result["unresolved"] == 1
+    data = query(service(ingestion), TimeIntent("date_range", "October", start_date="2026-10-01", end_date="2026-10-31"),
+                 types=("exam",))
+    assert data["count"] == 0 and not data["complete"]
+
+
+def test_codex_normalized_ordinal_date_and_ampm_use_document_context(tmp_path):
+    ingestion, _ = setup_documents(tmp_path, [
+        "Course information 2026",
+        "Final exam at 1:00pm on 24th November",
+    ])
+    ingestion.require_semantic_review = True
+    ingestion.ingest("outline", COURSE)
+    batch = ingestion.semantic_review_requests("outline", COURSE)
+    review = {"request_id": batch["requests"][0]["request_id"],
+              "reason_code": "scheduled_assessment", "events": [{
+        "title": "Final exam", "type": "exam", "semantic_status": "scheduled",
+        "date_expression": "24th November", "normalized_date": "2026-11-24",
+        "normalized_time": "13:00", "value_kind": "start_at",
+        "evidence_text": "Final exam at 1:00pm on 24th November",
+    }]}
+    assert ingestion.apply_semantic_review("outline", COURSE, semantic_payload(batch, [review]))["confirmed"] == 1

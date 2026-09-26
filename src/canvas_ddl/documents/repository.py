@@ -20,7 +20,7 @@ class DocumentRepository:
                 db.execute("CREATE TABLE IF NOT EXISTS documents (document_id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, course_id TEXT NOT NULL, parsed_json TEXT NOT NULL)")
                 db.execute("CREATE TABLE IF NOT EXISTS candidates (candidate_id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE, candidate_json TEXT NOT NULL, validation_json TEXT NOT NULL)")
                 db.execute("CREATE TABLE IF NOT EXISTS semantic_reviews (request_id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE, review_json TEXT NOT NULL)")
-                # Replace one approved document atomically, preserving other courses.
+                # Replace one trusted document atomically, preserving other courses.
                 db.execute("DELETE FROM documents WHERE document_id=?", (parsed.document_id,))
                 db.execute("INSERT INTO documents VALUES (?,?,?,?)", (parsed.document_id, parsed.sha256, course_id,
                             json.dumps(asdict(parsed), default=lambda v: v.isoformat(), ensure_ascii=False)))
