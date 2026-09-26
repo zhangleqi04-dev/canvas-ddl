@@ -4,6 +4,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from canvas_ddl import __version__
 from canvas_ddl.bootstrap import build_deadline_service
 from canvas_ddl.canvas.errors import ApplicationError
 from canvas_ddl.deadlines.query import DeadlineQuery
@@ -28,6 +29,7 @@ def timestamp(text):
 
 def parser():
     p = Parser(prog="canvas-ddl")
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("--env-file", default=str(Path.cwd() / ".env"))
     commands = p.add_subparsers(dest="command", required=True, parser_class=Parser)
     courses = commands.add_parser("courses")

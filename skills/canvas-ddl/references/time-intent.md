@@ -1,4 +1,4 @@
-# Semantic time contract (v0.7)
+# Semantic time contract
 
 Codex interprets the user's language; Python computes actual dates. This schema
 limits executable operations, not natural-language vocabulary. Use

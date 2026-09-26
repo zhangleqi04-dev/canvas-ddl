@@ -125,7 +125,7 @@ DOCUMENT_NOT_INGESTED.
 401 aborts; other source failures can yield partial document/Canvas facts. No
 stale Canvas cache fallback. Canonical details use the same reconciliation policy.
 
-## Provisional course-document content (v0.9)
+## Provisional course-document content
 
 file_library_check.scope=all_course_documents; coverage records course_id/code,
 listed_document_count/processed_document_count/unprocessed_document_count and access errors.

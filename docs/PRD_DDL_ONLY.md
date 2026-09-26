@@ -1,6 +1,6 @@
 # PRD — Multi-source Canvas DDL Assistant
 
-**Status:** Implemented contract v0.12.2 · 2026-09-26
+**Status:** Implemented contract v0.12.3 · 2026-09-26
 **Deployment:** single-user, local, read-only Canvas PAT  
 **Interface:** Codex Skill / CLI; MCP optional and deferred
 

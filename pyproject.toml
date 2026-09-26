@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canvas-ddl"
-version = "0.12.2"
+dynamic = ["version"]
 description = "Deterministic multi-source Canvas and trusted course-document deadline engine"
 requires-python = ">=3.11"
 dependencies = [
@@ -22,6 +22,9 @@ canvas-ddl = "canvas_ddl.cli.main:entrypoint"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "canvas_ddl.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

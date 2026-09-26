@@ -1,6 +1,6 @@
 # ARCHITECTURE — Multi-source Deadline Engine
 
-**Contract v0.12.2 · 2026-09-26**. Product: [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md).
+**Contract v0.12.3 · 2026-09-26**. Product: [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md).
 Rules: [AGENTS.md](AGENTS.md). Runtime Skill: [../skills/canvas-ddl/SKILL.md](../skills/canvas-ddl/SKILL.md).
 
 ## Document preparation interface
@@ -291,7 +291,7 @@ Presentation acceptance fixtures must cover relevant unconfirmed evidence beside
 zero and positive canonical results, unchanged counts/provenance, unresolved time-window
 wording, and exclusion of practice/example/statistical/negated contexts.
 
-## All-document inventory and provisional content contracts (v0.9; extends v0.5)
+## All-document inventory and provisional content contracts
 
 CourseDocumentInventory lists all Files metadata without a server-side MIME restriction;
 application/octet-stream falls back to a supported extension. Supported types are
@@ -359,7 +359,7 @@ validation, canonical deadlines, completeness or exam counts, or directly read s
 
 
 
-## Semantic time interface (v0.7)
+## Semantic time interface
 
 Codex → TimeIntent → TimeRangeResolver → inclusive TimeRange → DeadlineService.
 TimeIntent is a frozen, independently validated semantic parameter model in

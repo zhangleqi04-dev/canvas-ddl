@@ -1,6 +1,6 @@
 {
   "name": "canvas-ddl",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "description": "Query Canvas and validated trusted course documents for deadlines with source-aware reconciliation.",
   "author": {
     "name": "Canvas DDL Contributors",

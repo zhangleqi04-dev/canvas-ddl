@@ -3,7 +3,7 @@
 Applies to the entire project through root AGENTS.md. Read
 [PRD_DDL_ONLY.md](PRD_DDL_ONLY.md), [ARCHITECTURE.md](ARCHITECTURE.md), and
 [../skills/canvas-ddl/SKILL.md](../skills/canvas-ddl/SKILL.md) before changing behavior.
-Contract v0.12.2 · 2026-09-26. If documents conflict, preserve product intent and
+Contract v0.12.3 · 2026-09-26. If documents conflict, preserve product intent and
 explicitly update every affected contract; never silently keep obsolete rules.
 
 ## Non-negotiable ownership
@@ -173,7 +173,7 @@ the change contains no unrelated refactor. Report limitations and real test
 evidence, not plausible LLM answers. Update PRD for scope, Architecture for
 interfaces/layers, AGENTS for rules and runtime SKILL for adapter behavior.
 
-## All-course-document query requirements (v0.9; extends v0.5)
+## All-course-document query requirements
 
 Automatic query refresh must not filter filenames for syllabus/outline/handout or
 silently stop at 20 files. Select all supported documents by MIME/extension from
@@ -224,7 +224,7 @@ validation, canonical deadlines, completeness or exam counts, or directly read s
 
 
 
-## Structured time ownership (v0.7)
+## Structured time ownership
 
 Require structured TimeIntent for every natural-language Skill query. The engine
 must not interpret raw time language through a phrase whitelist, aliases or regex;

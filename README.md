@@ -189,9 +189,14 @@ CANVAS_DOCUMENT_STORE 和 CANVAS_DOCUMENT_REGISTRY 改位置，路径相对于 `
 python -m pytest -q
 ```
 
+使用 `canvas-ddl --version` 查看当前运行包版本。Python 包版本的唯一来源是
+`canvas_ddl.__version__`；构建元数据动态读取该值，测试会检查插件清单和契约文档没有漂移。
+`codex-semantic-v2`、`Parser v3`、`document-validator-v4` 等名称是独立的内部
+schema/规则版本，不代表项目发布版本。
+
 默认测试为离线模拟数据与生成的 PDF，不需要真实 token。
 [PRD](docs/PRD_DDL_ONLY.md)、[Architecture](docs/ARCHITECTURE.md)、
-[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.12.2。
+[开发规则](docs/AGENTS.md)、[运行技能](skills/canvas-ddl/SKILL.md) 同步定义 v0.12.3。
 本地验证记录可能包含私有课程信息，因此不提交到公开仓库。
 
 PDF parser 依据 [pypdf 官方文档](https://pypdf.readthedocs.io/en/stable/user/extract-text.html)；
@@ -204,7 +209,7 @@ OCR 依据 [PaddleOCR 官方安装说明](https://www.paddleocr.ai/main/en/versi
 常驻显存。Windows CPU 运行时固定使用 PaddlePaddle 3.2.x；3.3.1 已知在该组合上
 可能触发 oneDNN 不支持的算子。
 
-## 全课程文档考试检查（v0.9）
+## 全课程文档考试检查
 
 “下周有什么考试/几门考试”自动检查所选课程的所有受支持文档，不按文件名筛选，也没有
 默认20份上限。上述 prepare-documents 是单独的显式维护命令，其文件名提示与20份
